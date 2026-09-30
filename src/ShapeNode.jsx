@@ -47,8 +47,12 @@ const executorLabel = { code: '코드', perception: '음성·문자 인식', llm
 function Ports({ vertical = false }) {
   return <><Handle id="in" type="target" position={Position.Left} className="sm-handle" />
     <Handle id="out" type="source" position={vertical ? Position.Left : Position.Right} className="sm-handle" />
+    <Handle id="left-source" type="source" position={Position.Left} className="sm-handle" />
+    <Handle id="right-target" type="target" position={Position.Right} className="sm-handle" />
     <Handle id="top" type="target" position={Position.Top} className="sm-handle" />
-    <Handle id="bottom" type="source" position={Position.Bottom} className="sm-handle" /></>;
+    <Handle id="bottom" type="source" position={Position.Bottom} className="sm-handle" />
+    <Handle id="top-source" type="source" position={Position.Top} className="sm-handle" />
+    <Handle id="bottom-target" type="target" position={Position.Bottom} className="sm-handle" /></>;
 }
 
 function FeatureHints({ node, reading }) {
@@ -76,7 +80,7 @@ export const ShapeGroup = memo(function ShapeGroup({ data, selected }) {
   const { node, state, index, childCount } = data;
   return <div className={`sm-group sm-group--${state.status} sm-group--depth-${data.depth || 0}${selected ? ' is-selected' : ''}${data.collapsed ? ' is-collapsed' : ''}`} data-testid={`shape-group-${node.id}`}>
     <Ports />
-    <div className="sm-group__header"><span className="sm-group__index">{data.depth ? `내부 ${childCount}개` : String(index).padStart(2, '0')}</span><StateBadge status={state.status} compact /><FeatureHints node={node} reading={data.reading} />
+    <div className="sm-group__header"><span className="sm-group__index">{data.depth ? `내부 ${childCount}개` : String(index).padStart(2, '0')}</span><StateBadge status={state.status} compact />{data.collapsed && !data.depth && <span className="sm-group__part-count">세부 영역 {childCount}개</span>}<FeatureHints node={node} reading={data.reading} />
       {childCount > 0 && <button className="sm-icon-button sm-group__fold nodrag" aria-label={`${node.label} ${data.collapsed ? '내부 펼치기' : '내부 접기'}`} aria-expanded={!data.collapsed} onClick={(event) => { event.stopPropagation(); data.onToggle(node.id); }}><ShapeIcon name={data.collapsed ? 'plus' : 'minus'} size={14} /></button>}
       <button className="sm-icon-button sm-group__focus nodrag" aria-label={`${node.label} 안으로 들어가기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><ShapeIcon name="expand" size={14} /></button>
     </div><button className="sm-group__title nodrag" onClick={(event) => { event.stopPropagation(); data.onOpen(node.id); }}>{node.label}</button>

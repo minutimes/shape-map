@@ -3,6 +3,13 @@
 The product workspace is the default route. `?editor=1` opens the detailed
 hierarchy editor. Both edit the same source and preserve the same feature IDs.
 
+The whole-system view starts with folded areas and the main handoffs. Explicit
+area relationships remain visible; **Detailed connections** exposes the smaller
+data connections. Entering an area opens deeper nested cards. An explicit focus
+link opens that area at a readable scale rather than restoring a different view's
+saved camera. Reference notes remain in the source but are excluded from product
+feature counts and color totals.
+
 ## Canonical metadata
 
 The existing `mlc-format: 1` Mermaid subset remains supported. Shape map adds:
@@ -132,6 +139,19 @@ saved endpoints. Only an explicit sequence or recorded connection creates a
 flow arrow. Function hierarchy is progressive: enter a feature to see its parts.
 Small screens use one column and readable initial zoom. Overview titles remain
 readable while zoomed out.
+
+The whole-system projection initially folds deeper containers; entering an area
+exposes more levels without limiting the source's hierarchy. The scope bar counts
+product features and the selected area's descendants, excluding inherited
+reference sections. Its whole-system action is available even on deep links.
+The area reader shows authored natural-language descriptions, nested parts,
+actual recorded turn changes, and saved proposals. It never synthesizes missing
+architecture from the code or treats a proposal as completed implementation.
+Feature history compares consecutive saved snapshots, independently of a red
+proposal or review color, with before/after fields and connection descriptions.
+The first turn remains a baseline. Git history can be narrowed to the selected
+feature and its descendants using their explicit source-file links; Git commits
+are still distinct from map turns, installed runtime, and human acceptance.
 
 Browser drafts store values, the editing base, and its fingerprint. External
 changes merge into untouched fields. Conflicting edits preserve both versions

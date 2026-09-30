@@ -7,6 +7,8 @@ import { absoluteShapePosition, defaultShapeCollapsed, shapeAncestors, shapeLayo
 import { ShapeBlock, ShapeGroup, ShapeIcon, StateBadge, SHAPE_STATES } from './ShapeNode.jsx';
 import { blockDraftValues, BLOCK_DRAFT_FIELDS, draftConflicts, reconcileDraft } from './shapeDraft.js';
 import CanvasOverview from './CanvasNavigation.jsx';
+import ScopeReader, { FeatureHistory } from './ScopeReader.jsx';
+import { areaReading, featureHistory } from './systemReading.js';
 import './shapeWorkspace.css';
 
 const nodeTypes = { shapeBlock: ShapeBlock, shapeGroup: ShapeGroup };
@@ -46,7 +48,7 @@ function Dialog({ title, subtitle, children, onClose, wide = false }) {
 const LINK_KINDS = { flow: '처리 순서', data: '자료 전달', dependency: '필요한 기능', activation: '모델 역할' };
 const EXECUTORS = { code: '코드로 처리', perception: '음성·문자 인식', llm: '추론·생성 모델', jev: '구조화 판단 모델', human: '사람이 판단' };
 
-function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, send, busy, onClose, onOpen }) {
+function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, mapPath, send, busy, onClose, onOpen, onRepository }) {
   const [tab, setTab] = useState('overview');
   const draftKey = `shape-map:draft:${mapPath}:${node.id}`;
   const initial = blockDraftValues(node);
@@ -96,11 +98,12 @@ function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, s
   const comments = node.block?.comments || [];
   const children = graph.nodes.filter((item) => item.parentId === node.id && item.section !== 'reference');
   const links = (graph.links || []).filter((link) => link.source === node.id || link.target === node.id);
+  const records = featureHistory(turns, node.id);
   return <aside className="sm-inspector" aria-label="기능 블록 상세" data-testid="shape-inspector">
     <header className="sm-inspector__heading"><span className="sm-eyebrow">기능 블록</span><button className="sm-icon-button" aria-label="기능 상세 닫기" onClick={onClose}><ShapeIcon name="close" /></button></header>
     <h2>{node.label}</h2><StateBadge status={state.status} />
     <div className="sm-inspector-tabs" role="tablist" aria-label="기능 정보">
-      {[['overview', '개요'], ['links', `연결${links.length ? ` ${links.length}` : ''}`], ['comments', `의견${comments.length ? ` ${comments.length}` : ''}`], ['proposal', '다음 변경안']].map(([id, label]) =>
+      {[['overview', '개요'], ['links', `연결${links.length ? ` ${links.length}` : ''}`], ['history', '변경 기록'], ['comments', `의견${comments.length ? ` ${comments.length}` : ''}`], ['proposal', '다음 변경안']].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} aria-controls={`sm-inspector-panel-${id}`} onClick={() => setTab(id)}>{label}</button>)}
     </div>
     <div className="sm-inspector__body" role="tabpanel" id={`sm-inspector-panel-${tab}`}>
@@ -150,6 +153,11 @@ function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, s
           if (await send({ type: 'upsertLink', link: { ...link, source: node.id, label: linkDraft.label.trim(), ...(condition.trim() ? { condition: condition.trim() } : {}) } })) setLinkDraft({ id: `link_${crypto.randomUUID().replaceAll('-', '_')}`, target: '', kind: 'data', label: '', condition: '' });
         }}><h3>다른 기능과 연결하기</h3><label>연결할 기능 찾기<input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder="기능 이름으로 좁혀 보세요" /></label><label>어느 기능으로 이어지나요?<select required value={linkDraft.target} onChange={(event) => setLinkDraft((value) => ({ ...value, target: event.target.value }))}><option value="">기능 선택</option>{graph.nodes.filter((item) => item.id !== node.id && item.section !== 'reference' && (item.id === linkDraft.target || item.label.toLowerCase().includes(targetSearch.trim().toLowerCase()))).map((item) => <option key={item.id} value={item.id}>{item.label}{item.parentId ? ` · ${graph.nodes.find((parent) => parent.id === item.parentId)?.label}` : ''}</option>)}</select></label><label>어떤 관계인가요?<select value={linkDraft.kind} onChange={(event) => setLinkDraft((value) => ({ ...value, kind: event.target.value }))}>{Object.entries(LINK_KINDS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label>무엇을 전달하거나 함께 하나요?<input value={linkDraft.label} onChange={(event) => setLinkDraft((value) => ({ ...value, label: event.target.value }))} placeholder="예: 확인한 컷 목록을 편집 단계로 전달" maxLength={180} required /></label><label>언제 연결되나요? <span className="sm-field-optional">선택</span><textarea rows={2} value={linkDraft.condition} onChange={(event) => setLinkDraft((value) => ({ ...value, condition: event.target.value }))} maxLength={4000} /></label><button className="sm-button sm-button--dark" disabled={busy || !linkDraft.target || !linkDraft.label.trim()}><ShapeIcon name="plus" size={14} />연결 저장</button></form>}
       </>}
+      {tab === 'history' && <>
+        <p className="sm-tab-intro">이 기능의 설명·내부 구성·연결이 어느 지도 턴에서 어떻게 달라졌는지 보여줍니다. 수정 대상에도 이전 기록이 남습니다.</p>
+        <FeatureHistory records={records} />
+        {node.block?.files?.length > 0 && <button className="sm-button" onClick={() => onRepository(node.id)}><ShapeIcon name="code" size={14} />이 기능의 실제 코드 변경</button>}
+      </>}
       {tab === 'comments' && <>
         <p className="sm-tab-intro">이 기능을 보며 든 생각을 남겨 주세요. 걱정되는 점은 지도에 노란색으로 표시됩니다.</p>
         <div className="sm-comments">{comments.length ? comments.map((comment) => <article className={`sm-comment${comment.resolved ? ' is-resolved' : ''}`} key={comment.id}>
@@ -198,6 +206,7 @@ export default function ShapeWorkspace() {
   const [dialog, setDialog] = useState(null);
   const [brief, setBrief] = useState(null);
   const [repository, setRepository] = useState(null);
+  const [repositoryScopeId, setRepositoryScopeId] = useState(null);
   const [copied, setCopied] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newSummary, setNewSummary] = useState('');
@@ -277,8 +286,14 @@ export default function ShapeWorkspace() {
       return [node.id, state];
     }));
   }, [graph, previousTurn, selectedTurn]);
-  const totals = Object.keys(SHAPE_STATES).reduce((result, status) => ({ ...result, [status]: Object.values(states).filter((state) => state.status === status).length }), {});
+  const productArea = useMemo(() => graph ? areaReading(graph, root?.id) : null, [graph, root?.id]);
+  const productStates = Object.entries(states).filter(([id]) => id !== root?.id && productArea.ids.has(id)).map(([, state]) => state);
+  const totals = Object.keys(SHAPE_STATES).reduce((result, status) => ({ ...result, [status]: productStates.filter((state) => state.status === status).length }), {});
   const currentFocus = graph?.nodes.find((node) => node.id === focusId) || root;
+  const area = useMemo(() => graph ? areaReading(graph, currentFocus?.id) : null, [graph, currentFocus?.id]);
+  const visibleTurns = selectedTurn ? turns.slice(0, index + 1) : turns;
+  const repositoryScope = repositoryScopeId && snapshot?.graph.nodes.some((node) => node.id === repositoryScopeId) ? areaReading(snapshot.graph, repositoryScopeId) : null;
+  const repositoryCommits = repository?.commits?.filter((commit) => !repositoryScope || commit.blocks.some((block) => repositoryScope.ids.has(block.id))) || [];
   const reading = useMemo(() => graph ? readingStates(graph, lensSelections) : {}, [graph, lensSelections]);
   const openNode = useCallback((id) => { setSelectedId(id); setSidebarOpen(false); }, []);
   const focusNode = useCallback((id) => {
@@ -315,22 +330,22 @@ export default function ShapeWorkspace() {
   useEffect(() => {
     if (!snapshot || restoredMap.current === snapshot.mapPath) return;
     restoredMap.current = snapshot.mapPath;
-    if (snapshot.view?.shape?.layoutVersion === 2) {
+    if (!focusId && snapshot.view?.shape?.layoutVersion === 2) {
       setViewPositions(snapshot.view.shape.positions || {});
-      if (!focusId) setCollapsedIds(snapshot.view.shape.collapsedIds || null);
+      setCollapsedIds(snapshot.view.shape.collapsedIds || null);
     }
   }, [snapshot]);
   useEffect(() => {
     if (!graph) return;
     const timer = setTimeout(() => {
       const view = snapshotRef.current?.view?.shape;
-      const saved = view?.layoutVersion === 2 && !singleColumn && !turnId && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
+      const saved = view?.layoutVersion === 2 && !focusId && !singleColumn && !turnId && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
       if (compact || (singleColumn && mode !== 'function')) {
         const boardWidth = compact ? 340 : 650;
         flow.setViewport({ x: Math.max(20, (window.innerWidth - boardWidth) / 2), y: 25, zoom: Math.min(1, (window.innerWidth - 40) / boardWidth) });
       }
       else if (saved) flow.setViewport(saved);
-      else if (mode === 'function') flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 });
+      else if (mode === 'function' || currentFocus?.id === root?.id) flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 });
       else flow.setViewport({ x: 28, y: 28, zoom: .9 });
     }, 80);
     return () => clearTimeout(timer);
@@ -369,7 +384,8 @@ export default function ShapeWorkspace() {
     try { const response = await fetch('/api/brief'); if (!response.ok) throw new Error(); const body = await response.json(); setBrief(body.text); }
     catch { setBrief('논의 내용을 불러오지 못했습니다. 연결을 확인한 뒤 다시 열어 주세요.'); }
   }
-  async function openRepository() {
+  async function openRepository(id) {
+    setRepositoryScopeId(typeof id === 'string' ? id : null);
     setDialog('repository'); setRepository(null);
     try { const response = await fetch('/api/repository'); if (!response.ok) throw new Error(); setRepository(await response.json()); }
     catch { setRepository({ connected: false, error: '변경 기록을 불러오지 못했습니다.' }); }
@@ -399,7 +415,7 @@ export default function ShapeWorkspace() {
     if (saved) { setDialog(null); if (dialog === 'block') { focusNode(newParent); openNode(createdId); } }
   }
   function chooseTurn(id) { setTurnId(id); setPlaying(false); setSelectedId(null); setViewPositions({}); setCollapsedIds(null); }
-  const results = search.trim() ? graph?.nodes.filter((node) => `${node.label} ${node.block?.summary || ''} ${node.task?.logic || ''}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 25) : [];
+  const results = search.trim() ? graph?.nodes.filter((node) => productArea.ids.has(node.id) && `${node.label} ${node.block?.summary || ''} ${node.task?.logic || ''}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 25) : [];
   if (!snapshot) return <main className="sm-loading"><span className="sm-logo" /><h1>shape map</h1><p>{connection === 'offline' ? '지도를 불러오지 못했습니다.' : '제품 지도를 펼치고 있습니다.'}</p>{connection === 'offline' && <button className="sm-button" onClick={() => window.location.reload()}>다시 연결</button>}</main>;
   return <main className={`shape-workspace${selected ? ' has-inspector' : ''}${selectedTurn ? ' is-history' : ''}`}>
     <header className="sm-topbar">
@@ -419,7 +435,7 @@ export default function ShapeWorkspace() {
         {search.trim() ? <nav className="sm-search-results" aria-label="검색 결과">{results?.length ? results.map((node) => <button key={node.id} onClick={() => { focusNode(node.parentId || node.id); openNode(node.id); setSearch(''); }}><ShapeIcon name="box" size={14} /><span>{node.label}</span></button>) : <p>일치하는 기능이 없습니다.</p>}</nav> : <>
           <p className="sm-nav-heading">제품 지도</p>
           <nav className="sm-view-nav" aria-label="지도 읽는 방식">{SHAPE_VIEWS.map((view) => <button key={view.id} aria-pressed={mode === view.id} onClick={() => { setMode(view.id); setViewPositions({}); setSidebarOpen(false); }}><ShapeIcon name={view.id === 'system' ? 'grid' : view.id === 'function' ? 'branch' : 'box'} size={17} /><span>{view.label}</span>{mode === view.id && <span className="sm-nav-current" />}</button>)}</nav>
-          <div className="sm-sidebar__separator" /><p className="sm-nav-heading">구성하는 기능 <span>{graph.nodes.length - 1}</span></p>
+          <div className="sm-sidebar__separator" /><p className="sm-nav-heading">구성하는 기능 <span>{area.total}</span></p>
           <nav className="sm-outline" aria-label="제품 기능">{graph.nodes.filter((node) => node.parentId === root.id && node.section !== 'reference').map((node) => <button key={node.id} aria-current={currentFocus?.id === node.id ? 'location' : undefined} onClick={() => focusNode(node.id)}><span className={`sm-outline-dot sm-outline-dot--${states[node.id].status}`} /><span>{node.label}</span><ShapeIcon name="chevron" size={12} /></button>)}
             {focusId && focusId !== root.id && <button className="sm-outline__all" onClick={() => focusNode(root.id)}><ShapeIcon name="back" size={13} />전체 지도</button>}
           </nav>
@@ -428,6 +444,11 @@ export default function ShapeWorkspace() {
       </aside>
       <section className="sm-stage" aria-label="무한 캔버스 제품 지도">
         <div className="sm-stage-heading"><div className="sm-stage-heading__title"><button className="sm-icon-button sm-mobile-menu" aria-label="제품 탐색 열기" onClick={() => setSidebarOpen(true)}><ShapeIcon name="menu" /></button><div><nav className="sm-breadcrumb" aria-label="지도 경로">{shapeAncestors(graph, currentFocus.id).map((node, itemIndex) => <span key={node.id}>{itemIndex > 0 && <ShapeIcon name="chevron" size={10} />}<button onClick={() => focusNode(node.id)} aria-current={node.id === currentFocus.id ? 'location' : undefined}>{itemIndex === 0 ? '제품 전체' : node.label}</button></span>)}</nav><h1>{currentFocus.label}<span>{SHAPE_VIEWS.find((view) => view.id === mode).label}</span></h1></div></div><button className="sm-button" disabled={Boolean(turnId) || busy} onClick={() => openCreate('block')}><ShapeIcon name="plus" size={15} /><span>기능 추가</span></button></div>
+        <div className="sm-area-reading" aria-label="전체 시스템과 현재 영역">
+          <button className="sm-area-home" onClick={() => focusNode(root.id)}><ShapeIcon name="grid" size={14} />전체 구성</button>
+          <span>{currentFocus.id === root.id ? `전체 ${area.total}개 기능 · 큰 영역 ${area.children.length}개` : `전체 ${area.total}개 중 이 영역 ${area.count}개`}</span>
+          <button className="sm-area-explain" onClick={() => setDialog('reading')}><ShapeIcon name="help" size={14} />구성·변경 설명<ShapeIcon name="chevron" size={11} /></button>
+        </div>
         <div className="sm-status-legend" aria-label="상태별 기능 필터"><span className="sm-legend-label">색으로 읽기</span>{Object.entries(SHAPE_STATES).filter(([status]) => status !== 'neutral').map(([status, state]) => <button key={status} className={`sm-legend-item sm-legend-item--${status}`} aria-pressed={filter === status} onClick={() => setFilter(filter === status ? null : status)}><span className="sm-state__dot" />{state.label}<b>{totals[status]}</b></button>)}{filter && <button className="sm-filter-clear" onClick={() => setFilter(null)}><ShapeIcon name="close" size={12} />필터 해제</button>}</div>
         <div className="sm-diagram-tools" aria-label="기능 구성과 조건">
           <div className="sm-depth-tools"><span>구성 깊이</span><button onClick={() => showDepth(1)}>큰 기능</button><button onClick={() => showDepth(3)}>세부 기능</button><button onClick={() => showDepth(Infinity)}>모두 펼치기</button></div>
@@ -466,9 +487,12 @@ export default function ShapeWorkspace() {
           {turns.length > 0 && <label className="sm-timeline-slider"><span className="sm-sr-only">보고 있는 개발 턴</span><input type="range" min="0" max={turns.length} value={index} onChange={(event) => chooseTurn(turns[Number(event.target.value)]?.id || null)} aria-valuetext={selectedTurn ? `턴 ${selectedTurn.number}: ${selectedTurn.title}` : '현재 형상'} /></label>}
         </footer>
       </section>
-      {selected && <BlockInspector key={`${turnId || 'current'}:${selected.id}`} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={openNode} />}
+      {selected && <BlockInspector key={`${turnId || 'current'}:${selected.id}`} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={openNode} onRepository={openRepository} />}
     </div>
     {toast && <div className={`sm-toast${toast.error ? ' is-error' : ''}`} role={toast.error ? 'alert' : 'status'}>{!toast.error && <ShapeIcon name="check" size={15} />}<span>{toast.text}</span><button className="sm-icon-button" aria-label="알림 닫기" onClick={() => setToast(null)}><ShapeIcon name="close" size={14} /></button></div>}
+    {dialog === 'reading' && <Dialog wide title={currentFocus.id === root.id ? '전체 시스템의 구성과 개선' : `${currentFocus.label} · 구성과 개선`} subtitle="큰 기능의 역할부터 세부 구성, 지난 변경, 다음 개선까지 읽습니다." onClose={() => setDialog(null)}>
+      <ScopeReader graph={graph} focusId={currentFocus.id} turns={visibleTurns} onFocus={(id) => { focusNode(id); setDialog(null); }} onOpen={(id) => { openNode(id); setDialog(null); }} onRepository={() => openRepository(currentFocus.id)} />
+    </Dialog>}
     {(dialog === 'block' || dialog === 'turn') && <Dialog title={dialog === 'turn' ? '현재 형상을 턴으로 기록' : '새 기능 블록'} subtitle={dialog === 'turn' ? '지금의 설명·변경안·의견을 함께 남깁니다.' : '제품에서 하는 일을 쉬운 말로 적어 주세요.'} onClose={() => setDialog(null)}>
       <form className="sm-form" onSubmit={create}><label>{dialog === 'turn' ? '이번 턴의 이름' : '기능 이름'}<input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder={dialog === 'turn' ? '예: 첫 형상 · 기능을 한눈에' : '예: 가입 없이 시작하기'} maxLength={180} required /></label>
         {dialog === 'block' && <label>어느 기능에 속하나요?<select value={newParent} onChange={(event) => setNewParent(event.target.value)}>{graph.nodes.filter((node) => node.section !== 'reference').map((node) => <option key={node.id} value={node.id}>{shapeAncestors(graph, node.id).map((item) => item.label).join(' / ')}</option>)}</select></label>}
@@ -496,8 +520,10 @@ export default function ShapeWorkspace() {
     {dialog === 'repository' && <Dialog wide title="레포에서 실제로 바뀐 것" subtitle="현재 지도에 연결한 파일을 기준으로 실제 코드 변경을 보여줍니다." onClose={() => setDialog(null)}>
       {!repository ? <p className="sm-dialog-copy">레포의 변경 기록을 읽고 있습니다…</p> : !repository.connected ? <p className="sm-dialog-copy">{repository.error || '이 지도에는 레포가 연결되어 있지 않습니다. 지도 파일과 논의는 그대로 사용할 수 있습니다.'}</p> : <>
         <div className="sm-repo-heading"><ShapeIcon name="code" size={16} /><strong>{repository.name}</strong><span>{repository.branch}</span></div>
+        {repositoryScope && <p className="sm-reader-note">보고 있는 기능: {repositoryScope.focus.label} · 이 안의 세부 기능과 연결된 변경을 함께 보여줍니다.</p>}
         {repository.working.files.length > 0 && <div className="sm-repo-working"><span>작업 중 · 아직 기록 전</span><p>파일 {repository.working.files.length}개 · 연결된 기능 {repository.working.blocks.length}개</p></div>}
-        <div className="sm-repo-commits">{repository.commits.map((commit) => <article key={commit.sha}><header><code>{commit.shortSha}</code><small>{dateText(commit.createdAt)}</small></header><h3>{commit.title}</h3><div className="sm-repo-blocks">{commit.blocks.length ? commit.blocks.map((block) => <button key={block.id} onClick={() => { const node = graph.nodes.find((item) => item.id === block.id); if (node) { focusNode(node.parentId || node.id); openNode(node.id); setDialog(null); } }}>{block.label}<ShapeIcon name="arrow" size={11} /></button>) : <span>지도에 연결된 기능 없음</span>}</div><details><summary>변경 파일 {commit.files.length}개</summary>{commit.files.map((file) => <code key={file}>{file}</code>)}</details></article>)}</div>
+        <div className="sm-repo-commits">{repositoryCommits.map((commit) => <article key={commit.sha}><header><code>{commit.shortSha}</code><small>{dateText(commit.createdAt)}</small></header><h3>{commit.title}</h3><div className="sm-repo-blocks">{commit.blocks.length ? commit.blocks.filter((block) => !repositoryScope || repositoryScope.ids.has(block.id)).map((block) => <button key={block.id} onClick={() => { const node = graph.nodes.find((item) => item.id === block.id); if (node) { focusNode(node.parentId || node.id); openNode(node.id); setDialog(null); } }}>{block.label}<ShapeIcon name="arrow" size={11} /></button>) : <span>지도에 연결된 기능 없음</span>}</div><details><summary>변경 파일 {commit.files.length}개</summary>{commit.files.map((file) => <code key={file}>{file}</code>)}</details></article>)}</div>
+        {!repositoryCommits.length && <p className="sm-tab-intro">최근 코드 기록에서 이 기능과 연결된 변경을 찾지 못했습니다.</p>}
       </>}
     </Dialog>}
   </main>;

@@ -23,6 +23,15 @@ model roles, and custom logic can be described without hardcoding a product's
 rules into the application. Selections explain the saved design and do not
 change the running product's configuration.
 
+**전체 구성** returns from a focused feature to the complete system. The scope
+bar distinguishes the whole product from the area currently on screen.
+**구성·변경 설명** explains that area's role, its nested parts, recorded changes,
+and saved improvement plans. Every card also has a **변경 기록** tab with actual
+before/after text, composition, and connections—even while it has a red proposal.
+Connected source files lead to the corresponding Git changes.
+
+![Read a system's composition and changes](docs/shape-map/system-reading.jpg)
+
 ![Nested feature composition](docs/shape-map/nested-cards.jpg)
 
 The infinite canvas uses a quiet monochrome palette. Color carries meaning:

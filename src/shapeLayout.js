@@ -20,7 +20,8 @@ export function shapeAncestors(graph, id) {
 export function defaultShapeCollapsed(graph, focusId) {
   const focusDepth = shapeAncestors(graph, focusId).length;
   const parents = new Set(graph.nodes.map((node) => node.parentId));
-  return graph.nodes.filter((node) => parents.has(node.id) && shapeAncestors(graph, node.id).length > focusDepth + 2).map((node) => node.id);
+  const wholeSystem = !graph.nodes.find((node) => node.id === focusId)?.parentId;
+  return graph.nodes.filter((node) => parents.has(node.id) && (wholeSystem ? shapeAncestors(graph, node.id).length >= focusDepth + 1 : shapeAncestors(graph, node.id).length > focusDepth + 2)).map((node) => node.id);
 }
 
 export function absoluteShapePosition(nodes, id) {
@@ -88,8 +89,10 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   const groups = children.get(root.id).length ? children.get(root.id) : [root];
   const collapsed = new Set(collapsedIds || defaultShapeCollapsed(graph, root.id));
   const result = [];
-  const columns = compact || singleColumn || groups.length === 1 || root.workflow?.mode === 'sequence' ? 1 : 2;
-  const width = compact ? 340 : columns === 1 ? 650 : Math.max(340, Math.min(650, (availableWidth - 150) / 2));
+  const wholeSystem = !root.parentId;
+  const columns = compact || singleColumn || groups.length === 1 || root.workflow?.mode === 'sequence' ? 1 : wholeSystem && availableWidth >= 1000 ? 3 : 2;
+  const width = compact ? 340 : columns === 1 ? 650 : wholeSystem ? Math.max(300, Math.min(500, (availableWidth - 120) / columns)) : Math.max(340, Math.min(650, (availableWidth - 150) / 2));
+  const columnGap = wholeSystem ? 45 : 100;
   const inset = (cardWidth) => cardWidth > 300 ? 20 : cardWidth > 200 ? 8 : 0;
   const measure = (node, cardWidth, depth) => {
     const titleHeight = lines(node.label, Math.max(100, cardWidth - 42), depth ? 14 : 16) * 22;
@@ -117,10 +120,10 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
     groups.slice(row * columns, (row + 1) * columns).forEach((group, column) => {
       const size = measure(group, width, 0);
       rowHeight = Math.max(rowHeight, size.height);
-      const position = positions[group.id] || { x: column * (width + 100), y: rowY };
+      const position = positions[group.id] || { x: column * (width + columnGap), y: rowY };
       draw(group, width, position.x, position.y, 0, null, size);
     });
-    rowY += rowHeight + 86;
+    rowY += rowHeight + (wholeSystem ? 76 : 86);
   }
   const visible = new Map(result.map((node) => [node.id, node]));
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -137,18 +140,44 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   };
   const edges = [];
   const pairs = new Set();
+  const groupIds = new Set(groups.map((node) => node.id));
   const addEdge = (link) => {
     if (link.kind === 'activation' && !showActivation) return;
+    // The whole-system overview shows the main handoffs and explicitly authored
+    // area relationships. Detail mode retains every saved data connection.
+    if (wholeSystem && !detailedLinks && link.kind !== 'flow' && link.kind !== 'activation'
+      && !(groupIds.has(link.source) && groupIds.has(link.target))) return;
     let source = project(link.source); let target = project(link.target);
     if (!source || !target || source === target) return;
     [source, target] = boundaries(source, target);
     const key = `${source}:${target}${detailedLinks ? `:${link.kind}` : ''}`;
     if (pairs.has(key)) return;
     pairs.add(key);
-    const from = visible.get(source); const to = visible.get(target);
-    const vertical = from.parentId === to.parentId && Math.abs(from.position.x - to.position.x) < 5;
-    edges.push({ id: link.id, source, target, sourceHandle: vertical ? 'bottom' : 'out', targetHandle: vertical ? 'top' : 'in',
-      type: 'smoothstep', label: link.label, labelStyle: { fontSize: 11, fill: '#676773' }, labelBgStyle: { fill: '#fafafa', fillOpacity: .98 }, labelBgPadding: [6, 3],
+    const from = absoluteShapePosition(result, source); const to = absoluteShapePosition(result, target);
+    const vertical = Math.abs(from.y - to.y) > 5 || Math.abs(from.x - to.x) < 5;
+    const fromNode = visible.get(source); const toNode = visible.get(target);
+    const siblings = result.filter((node) => node.id !== source && node.id !== target
+      && node.parentId === fromNode.parentId && fromNode.parentId === toNode.parentId);
+    const columnDetour = Math.abs(from.x - to.x) < 5 && siblings.some((node) => {
+      const point = absoluteShapePosition(result, node.id);
+      return point.y > Math.min(from.y, to.y) && point.y < Math.max(from.y, to.y)
+        && point.x <= from.x + fromNode.style.width / 2 && point.x + node.style.width >= from.x + fromNode.style.width / 2;
+    });
+    const rowDetour = Math.abs(from.y - to.y) < 5 && siblings.some((node) => {
+      const point = absoluteShapePosition(result, node.id);
+      return point.x > Math.min(from.x, to.x) && point.x < Math.max(from.x, to.x)
+        && point.y <= from.y + fromNode.style.height / 2 && point.y + node.style.height >= from.y + fromNode.style.height / 2;
+    });
+    let sourceHandle = vertical ? (from.y <= to.y ? 'bottom' : 'top-source') : (from.x <= to.x ? 'out' : 'left-source');
+    let targetHandle = vertical ? (from.y <= to.y ? 'top' : 'bottom-target') : (from.x <= to.x ? 'in' : 'right-target');
+    if (columnDetour) {
+      sourceHandle = from.y < to.y ? 'out' : 'left-source';
+      targetHandle = from.y < to.y ? 'right-target' : 'in';
+    } else if (rowDetour) { sourceHandle = 'top-source'; targetHandle = 'top'; }
+    const label = wholeSystem && !detailedLinks && (columnDetour || rowDetour
+      || !(groupIds.has(link.source) && groupIds.has(link.target))) ? undefined : link.label;
+    edges.push({ id: link.id, source, target, sourceHandle, targetHandle,
+      type: 'smoothstep', label, labelStyle: { fontSize: 11, fill: '#676773' }, labelBgStyle: { fill: '#fafafa', fillOpacity: .98 }, labelBgPadding: [6, 3],
       markerEnd: { type: 'arrowclosed', color: '#8d8d99', width: 14, height: 14 }, zIndex: 100,
       style: { stroke: '#8d8d99', strokeWidth: 1.3, ...(link.kind !== 'flow' ? { strokeDasharray: '4 4' } : {}),
         opacity: reading[source]?.active === false || reading[target]?.active === false ? .15 : .8 }, data: { link } });
