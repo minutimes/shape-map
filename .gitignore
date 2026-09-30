@@ -6,3 +6,6 @@ playwright-report/
 test-results/
 *.log
 .DS_Store
+
+# Local navigation is separate from the shared product description.
+maps/*.view.json
