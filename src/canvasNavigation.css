@@ -1,0 +1,16 @@
+.react-flow__controls-button svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.react-flow__controls-button.canvas-zoom-value { width: 36px; height: 29px; font: 650 10px/1 -apple-system, BlinkMacSystemFont, sans-serif; color: #52665c; font-variant-numeric: tabular-nums; }
+.canvas-overview { position: absolute; inset: 0; z-index: 6; overflow: hidden; pointer-events: none; }
+.overview-label { position: absolute; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #c6cec5; border-radius: 7px; background: #fffdf5; color: #203e31; box-shadow: 0 2px 6px #243b2310; font: 750 14px/20px -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif; letter-spacing: -.025em; text-align: left; pointer-events: auto; cursor: pointer; }
+.overview-label__text { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.overview-label__count { flex: none; color: #718176; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.overview-label:hover, .overview-label:focus-visible, .overview-label.is-selected { z-index: 2; color: #124633; background: #f3fbf3; border-color: #739780; }
+.overview-label:focus-visible { outline: 2px solid #226a4e; outline-offset: 2px; }
+.overview-label:disabled { cursor: default; }
+.overview-label__tooltip { display: none; position: absolute; top: calc(100% + 7px); left: var(--overview-tooltip-left, 0px); width: var(--overview-tooltip-width, 300px); max-height: var(--overview-tooltip-height, 280px); overflow: auto; padding: 11px 13px; border: 1px solid #ccd5ca; border-radius: 8px; color: #294337; background: #fffefa; box-shadow: 0 5px 16px #243b2320; font-size: 13px; font-weight: 550; line-height: 1.55; letter-spacing: -.015em; white-space: normal; overflow-wrap: anywhere; }
+.overview-label:hover .overview-label__tooltip, .overview-label:focus-visible .overview-label__tooltip { display: block; }
+.overview-label[data-tooltip-above='true'] .overview-label__tooltip { top: auto; bottom: calc(100% + 7px); }
+.wf-node[data-overview='true'] .wf-card > * { opacity: .38; }
+.wf-node[data-overview='true'] .wf-card { box-shadow: none; }
+.wf-node[data-overview='true'] .wf-expand-button { visibility: hidden; }
+.wf-node[data-overview='true'] { cursor: zoom-in; }

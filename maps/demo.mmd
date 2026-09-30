@@ -1,0 +1,29 @@
+flowchart LR
+  %% mlc-format: 1
+  direction(["영상 설계 지도"])
+  live(["실사 영상"])
+  planning["기획"]
+  stages(["제작 단계"])
+  stage1["1. 원본 이해"]
+  stage15["1.5. 구조 점검"]
+  shortform(["숏폼"])
+  original["자체 제작"]
+
+  direction --> live
+  live --> planning
+  live --> stages
+  stages --> stage1
+  stages --> stage15
+  direction --> shortform
+  shortform --> original
+
+  classDef direction fill:#16362F,stroke:#4FD1A0,color:#F5FFF9,stroke-width:2px
+  classDef stage fill:#F2F6F3,stroke:#78958A,color:#17362E,stroke-width:1px
+  classDef focus fill:#FFF0C7,stroke:#C98A17,color:#4F3506,stroke-width:2px
+  class direction direction
+  class live,stages,shortform stage
+  class planning,stage1,stage15,original focus
+
+  %% mlc-legend: direction|방향|전체 구조의 출발점
+  %% mlc-legend: stage|영역|점진적으로 펼쳐 보는 작업 영역
+  %% mlc-legend: focus|구체화 대상|지금 논의하거나 구현할 항목

@@ -1,0 +1,45 @@
+{
+  "name": "shape-map",
+  "version": "0.2.0",
+  "description": "A shared product map for people and AI: features, discussions, and development turns.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "spike": "node spikes/mermaid-validate.mjs",
+    "dev": "node server/index.mjs --dev",
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "start:local": "node scripts/service.mjs start",
+    "stop:local": "node scripts/service.mjs stop",
+    "status:local": "node scripts/service.mjs status",
+    "test": "vitest run",
+    "test:browser": "node scripts/browser-acceptance.mjs",
+    "test:reparent-drag": "node scripts/reparent-drag-acceptance.mjs",
+    "test:node-layout": "node scripts/node-layout-acceptance.mjs",
+    "test:watch": "vitest",
+    "map": "node bin/mapctl.mjs"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
+    "@vitejs/plugin-react": "6.1.1",
+    "@xyflow/react": "12.11.6",
+    "chokidar": "5.0.0",
+    "commander": "15.0.0",
+    "express": "5.2.1",
+    "jsdom": "30.1.0",
+    "mermaid": "11.17.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vite": "8.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0",
+    "supertest": "7.2.2",
+    "vitest": "5.0.1"
+  }
+}

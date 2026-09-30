@@ -1,0 +1,69 @@
+flowchart LR
+  %% mlc-format: 1
+  root(["제작 시스템"])
+  live(["실사"])
+  motion(["모션"])
+  ai(["AI 영화·드라마"])
+  longform["롱폼"]
+  shortform(["숏폼"])
+  original["자체 제작"]
+  excerpt["롱폼 발췌"]
+  prep["기획"]
+  capture["촬영"]
+  edit(["편집"])
+  s1["1. 원본 이해"]
+  s15["1.5. 구조 점검"]
+  s2["2. 컷 구성"]
+  s3["3. 자막"]
+  s4["4. 사운드"]
+  s5["5. 마무리"]
+  polish["폴리싱"]
+  publish(["발행"])
+  title["제목"]
+  thumb["썸네일"]
+  caption["설명·자막"]
+  schedule["게시 시점"]
+  role(["역할"])
+  deterministic["결정론적 처리"]
+  perception["로컬 인식"]
+  generation["생성 모델"]
+  human["사람 판단"]
+
+  root --> live
+  root --> motion
+  root --> ai
+  live --> longform
+  live --> shortform
+  shortform --> original
+  shortform --> excerpt
+  longform --> prep
+  longform --> capture
+  longform --> edit
+  edit --> s1
+  edit --> s15
+  edit --> s2
+  edit --> s3
+  edit --> s4
+  edit --> s5
+  s5 --> polish
+  longform --> publish
+  publish --> title
+  publish --> thumb
+  publish --> caption
+  publish --> schedule
+  root --> role
+  role --> deterministic
+  role --> perception
+  role --> generation
+  role --> human
+
+  classDef direction fill:#16362F,stroke:#4FD1A0,color:#F5FFF9,stroke-width:2px
+  classDef stage fill:#F2F6F3,stroke:#78958A,color:#17362E,stroke-width:1px
+  classDef focus fill:#FFF0C7,stroke:#C98A17,color:#4F3506,stroke-width:2px
+  class root direction
+  class live,motion,ai,shortform,edit,publish,role stage
+  class longform,original,excerpt,prep,capture,s1,s15,s2,s3,s4,s5,polish,title,thumb,caption,schedule,deterministic,perception,generation,human focus
+
+  %% mlc-legend: direction|방향|전체 시스템의 큰 갈래
+  %% mlc-legend: stage|영역|필요할 때 펼쳐 보는 작업 영역
+  %% mlc-legend: focus|구체화 대상|세부 논의와 검증이 필요한 항목
