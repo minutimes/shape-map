@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, useReactFlow } from '@xyflow/react';
+import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, getViewportForBounds, useReactFlow } from '@xyflow/react';
 import { mutateMap, readMap, saveView } from './api.js';
 import { compareTurnGraphs, getBlockState, nodeFingerprint } from '../lib/shape.mjs';
 import { readingStates } from '../lib/diagram.mjs';
 import { absoluteShapePosition, defaultShapeCollapsed, shapeAncestors, shapeLayout, SHAPE_VIEWS, turnGraph } from './shapeLayout.js';
 import { ShapeBlock, ShapeGroup, ShapeIcon, StateBadge, SHAPE_STATES } from './ShapeNode.jsx';
+import { ShapeConnection } from './ShapeEdge.jsx';
+import { routeShapeEdges, shapeCanvasBounds } from './shapeRouting.js';
 import { blockDraftValues, BLOCK_DRAFT_FIELDS, draftConflicts, reconcileDraft } from './shapeDraft.js';
 import CanvasOverview from './CanvasNavigation.jsx';
 import ScopeReader, { FeatureHistory } from './ScopeReader.jsx';
@@ -12,6 +14,7 @@ import { areaReading, featureHistory } from './systemReading.js';
 import './shapeWorkspace.css';
 
 const nodeTypes = { shapeBlock: ShapeBlock, shapeGroup: ShapeGroup };
+const edgeTypes = { shapeConnection: ShapeConnection };
 const EMPTY_DIFF = { addedIds: [], changedIds: [], removedIds: [] };
 const EMPTY_TURNS = [];
 const dateText = (date) => new Date(date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', timeZone: 'Asia/Seoul' });
@@ -320,7 +323,15 @@ export default function ShapeWorkspace() {
   [graph, currentFocus?.id, mode, viewPositions, states, openNode, focusNode, toggleNode, collapsedIds, reading, showActivation, detailedLinks, compact, singleColumn, windowWidth]);
   useEffect(() => setNodes(layout.nodes.map((node) => ({ ...node, selected: node.id === selectedId,
     className: (filter && node.data.state.status !== filter) || reading[node.id]?.active === false ? 'sm-node-muted' : '' }))), [layout, selectedId, filter, reading]);
-  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}`;
+  const canvasEdges = useMemo(() => routeShapeEdges(nodes, layout.edges), [nodes, layout.edges]);
+  const diagramGeometry = useRef(null);
+  diagramGeometry.current = { nodes, edges: canvasEdges };
+  const fitDiagram = useCallback(() => {
+    const bounds = shapeCanvasBounds(diagramGeometry.current.nodes, diagramGeometry.current.edges);
+    const canvas = canvasRef.current;
+    if (bounds && canvas) flow.setViewport(getViewportForBounds(bounds, canvas.clientWidth, canvas.clientHeight, .2, 1.15, .09));
+  }, [flow]);
+  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}:${detailedLinks}:${showActivation}`;
   const overviewNodes = useMemo(() => nodes.map((node) => {
     return { ...node, position: absoluteShapePosition(nodes, node.id),
       data: { ...node.data, label: node.data.node.label, parentId: node.data.node.parentId,
@@ -339,17 +350,21 @@ export default function ShapeWorkspace() {
     if (!graph) return;
     const timer = setTimeout(() => {
       const view = snapshotRef.current?.view?.shape;
-      const saved = view?.layoutVersion === 2 && !focusId && !singleColumn && !turnId && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
+      const saved = view?.layoutVersion === 2 && !focusId && !singleColumn && !turnId && !detailedLinks && !showActivation && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
       if (compact || (singleColumn && mode !== 'function')) {
-        const boardWidth = compact ? 340 : 650;
-        flow.setViewport({ x: Math.max(20, (window.innerWidth - boardWidth) / 2), y: 25, zoom: Math.min(1, (window.innerWidth - 40) / boardWidth) });
+        const bounds = shapeCanvasBounds(diagramGeometry.current.nodes, diagramGeometry.current.edges);
+        const canvasWidth = canvasRef.current?.clientWidth || window.innerWidth;
+        if (bounds) {
+          const zoom = Math.min(1, (canvasWidth - 40) / Math.max(1, bounds.width));
+          flow.setViewport({ x: (canvasWidth - bounds.width * zoom) / 2 - bounds.x * zoom, y: 25 - bounds.y * zoom, zoom });
+        }
       }
       else if (saved) flow.setViewport(saved);
-      else if (mode === 'function' || currentFocus?.id === root?.id) flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 });
+      else if (mode === 'function' || currentFocus?.id === root?.id) fitDiagram();
       else flow.setViewport({ x: 28, y: 28, zoom: .9 });
     }, 80);
     return () => clearTimeout(timer);
-  }, [layoutKey, Boolean(graph)]);
+  }, [layoutKey, Boolean(graph), fitDiagram]);
   useEffect(() => {
     if (!playing) return;
     const timer = setInterval(() => {
@@ -459,7 +474,7 @@ export default function ShapeWorkspace() {
         </div>
         {(graph.lenses || []).some((lens) => lensSelections[lens.id]) && <div className="sm-lens-description" role="status"><ShapeIcon name="branch" size={13} /><span>{graph.lenses.map((lens) => lens.options.find((option) => option.id === lensSelections[lens.id])?.description).filter(Boolean).join(' · ')}<small>지도에 기록된 관련 기능을 강조합니다.</small></span><button onClick={() => setLensSelections({})}>선택 해제</button></div>}
         <div className="sm-canvas" data-testid="shape-canvas" ref={canvasRef}>
-          <ReactFlow nodes={nodes} edges={layout.edges} nodeTypes={nodeTypes} minZoom={.2} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch zoomActivationKeyCode="Meta" panOnDrag selectionOnDrag={false} nodesConnectable={false} deleteKeyCode={null} colorMode="light"
+          <ReactFlow nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={.2} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch zoomActivationKeyCode="Meta" panOnDrag selectionOnDrag={false} nodesConnectable={false} deleteKeyCode={null} colorMode="light"
             onNodesChange={(changes) => setNodes((current) => applyNodeChanges(changes, current))}
             onNodeClick={(_event, node) => openNode(node.id)} onPaneClick={() => setSelectedId(null)}
             onNodeDragStop={(_event, node) => {
@@ -477,7 +492,7 @@ export default function ShapeWorkspace() {
             {minimap && <MiniMap pannable zoomable nodeColor={(node) => ({ planned: '#e36a69', verified: '#6baf86', changed: '#719ddc', concern: '#d3af5a' }[node.data.state?.status] || '#dedee2')} />}
           </ReactFlow>
           {selectedTurn && <div className="sm-replay-badge"><ShapeIcon name="history" size={14} />턴 {selectedTurn.number} · {selectedTurn.title}<button onClick={() => chooseTurn(null)}>현재로 돌아가기<ShapeIcon name="arrow" size={13} /></button></div>}
-          <div className="sm-canvas-bottom"><span className="sm-canvas-tip">{mode === 'function' ? '선은 기능의 소속을 나타냅니다' : '카드 안은 소속 · 화살표는 연결 · +로 내부 펼치기'}</span><div className="sm-zoom"><button aria-label="지도 축소" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="minus" size={14} /></button><button className="sm-zoom-value" aria-label="지도 100%로 보기" onClick={() => flow.zoomTo(1)}>{Math.round(zoom * 100)}%</button><button aria-label="지도 확대" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="plus" size={14} /></button><span /><button aria-label="지도 화면에 맞추기" onClick={() => flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 })}><ShapeIcon name="expand" size={14} /></button><button aria-label="미니맵 보기" aria-pressed={minimap} onClick={() => setMinimap(!minimap)}><ShapeIcon name="grid" size={14} /></button></div></div>
+          <div className="sm-canvas-bottom"><span className="sm-canvas-tip">{mode === 'function' ? '선은 기능의 소속을 나타냅니다' : '카드 안은 소속 · 화살표는 연결 · +로 내부 펼치기'}</span><div className="sm-zoom"><button aria-label="지도 축소" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="minus" size={14} /></button><button className="sm-zoom-value" aria-label="지도 100%로 보기" onClick={() => flow.zoomTo(1)}>{Math.round(zoom * 100)}%</button><button aria-label="지도 확대" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="plus" size={14} /></button><span /><button aria-label="지도 화면에 맞추기" onClick={fitDiagram}><ShapeIcon name="expand" size={14} /></button><button aria-label="미니맵 보기" aria-pressed={minimap} onClick={() => setMinimap(!minimap)}><ShapeIcon name="grid" size={14} /></button></div></div>
         </div>
         <footer className="sm-timeline" aria-label="개발 턴 타임라인">
           <div className="sm-timeline__heading"><div><ShapeIcon name="history" size={16} /><strong>{selectedTurn ? `턴 ${selectedTurn.number}` : '현재 형상'}</strong><span>{selectedTurn ? selectedTurn.summary || selectedTurn.title : turns.length ? '지난 개선을 돌아보고, 다음 변화를 계획하세요.' : '첫 형상을 기록하면 개발 과정을 되짚을 수 있습니다.'}</span></div>{previousTurn && <button className="sm-turn-diff" onClick={() => setDialog('changes')}>변경 {diff.changedIds.length} · 추가 {diff.addedIds.length} · 제거 {diff.removedIds.length}</button>}<button className="sm-button sm-button--small" disabled={Boolean(turnId) || busy} onClick={() => openCreate('turn')}><ShapeIcon name="plus" size={13} />턴 기록</button></div>

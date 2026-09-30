@@ -123,7 +123,8 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
       const position = positions[group.id] || { x: column * (width + columnGap), y: rowY };
       draw(group, width, position.x, position.y, 0, null, size);
     });
-    rowY += rowHeight + (wholeSystem ? 76 : 86);
+    // Reserve enough room for independent handoffs and their explanations.
+    rowY += rowHeight + (wholeSystem ? 120 : 86);
   }
   const visible = new Map(result.map((node) => [node.id, node]));
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -177,7 +178,7 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
     const label = wholeSystem && !detailedLinks && (columnDetour || rowDetour
       || !(groupIds.has(link.source) && groupIds.has(link.target))) ? undefined : link.label;
     edges.push({ id: link.id, source, target, sourceHandle, targetHandle,
-      type: 'smoothstep', label, labelStyle: { fontSize: 11, fill: '#676773' }, labelBgStyle: { fill: '#fafafa', fillOpacity: .98 }, labelBgPadding: [6, 3],
+      type: 'shapeConnection', label,
       markerEnd: { type: 'arrowclosed', color: '#8d8d99', width: 14, height: 14 }, zIndex: 100,
       style: { stroke: '#8d8d99', strokeWidth: 1.3, ...(link.kind !== 'flow' ? { strokeDasharray: '4 4' } : {}),
         opacity: reading[source]?.active === false || reading[target]?.active === false ? .15 : .8 }, data: { link } });

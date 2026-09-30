@@ -23,6 +23,10 @@ model roles, and custom logic can be described without hardcoding a product's
 rules into the application. Selections explain the saved design and do not
 change the running product's configuration.
 
+Connections use separate ports and routing lanes, reserving space for their
+explanations. Routes update when cards move or unfold. **지도 화면에 맞추기**
+includes the arrows and their labels as well as the cards.
+
 **전체 구성** returns from a focused feature to the complete system. The scope
 bar distinguishes the whole product from the area currently on screen.
 **구성·변경 설명** explains that area's role, its nested parts, recorded changes,

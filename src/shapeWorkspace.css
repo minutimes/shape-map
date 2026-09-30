@@ -146,6 +146,9 @@
 .shape-workspace .overview-label__tooltip { color: #77778d; border-color: #dedee9; background: #fff; }
 .sm-canvas .react-flow__minimap { width: 130px; height: 83px; bottom: 47px; margin: 0 18px 0 0; border: 1px solid #dddde4; border-radius: 7px; background: #fff; overflow: hidden; box-shadow: 0 2px 7px #29293208; }
 .sm-handle { opacity: 0; pointer-events: none; }
+.sm-connection-label { pointer-events: none; font-size: 11px; }
+.sm-connection-label rect { fill: #f5f5f7; }
+.sm-connection-label text { fill: #676773; }
 .sm-group { height: 100%; width: 100%; border: 1px solid #d9d9e0; border-radius: 10px; background: #ededf1b3; padding: 17px 19px; }
 .sm-group.is-selected { border-color: #797982; box-shadow: 0 0 0 1px #797982; }
 .sm-group__header { display: flex; align-items: center; gap: 9px; }
