@@ -225,6 +225,7 @@ export default function ShapeWorkspace() {
   const [showActivation, setShowActivation] = useState(false);
   const [detailedLinks, setDetailedLinks] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [windowHeight, setWindowHeight] = useState(window.innerHeight);
   const clientId = useRef(`shape-${crypto.randomUUID()}`);
   const viewTimer = useRef(null);
   const canvasRef = useRef(null);
@@ -239,7 +240,7 @@ export default function ShapeWorkspace() {
     return () => { media.removeEventListener('change', change); tablet.removeEventListener('change', change); };
   }, []);
   useEffect(() => {
-    const resize = () => setWindowWidth(window.innerWidth);
+    const resize = () => { setWindowWidth(window.innerWidth); setWindowHeight(window.innerHeight); };
     window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize);
   }, []);
   useEffect(() => {
@@ -329,9 +330,10 @@ export default function ShapeWorkspace() {
   const fitDiagram = useCallback(() => {
     const bounds = shapeCanvasBounds(diagramGeometry.current.nodes, diagramGeometry.current.edges);
     const canvas = canvasRef.current;
-    if (bounds && canvas) flow.setViewport(getViewportForBounds(bounds, canvas.clientWidth, canvas.clientHeight, .2, 1.15, .09));
+    if (bounds && canvas) flow.setViewport(getViewportForBounds(bounds, canvas.clientWidth, canvas.clientHeight, .2, 1.15,
+      { left: '4%', right: '4%', top: '24px', bottom: '52px' }));
   }, [flow]);
-  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}:${detailedLinks}:${showActivation}`;
+  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}:${detailedLinks}:${showActivation}:${windowWidth}:${windowHeight}`;
   const overviewNodes = useMemo(() => nodes.map((node) => {
     return { ...node, position: absoluteShapePosition(nodes, node.id),
       data: { ...node.data, label: node.data.node.label, parentId: node.data.node.parentId,
