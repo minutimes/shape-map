@@ -14,7 +14,7 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ onZoomIn, o
 });
 
 /** Screen-space titles subscribe to camera changes without re-rendering the graph. */
-export default memo(function CanvasOverview({ nodes, selectedId, canvasRef, onNavigate, busy }) {
+export default memo(function CanvasOverview({ nodes, selectedId, canvasRef, onNavigate, busy, actionLabel = '확대해서 보기' }) {
   const transform = useStore((state) => state.transform);
   const width = useStore((state) => state.width);
   const height = useStore((state) => state.height);
@@ -84,7 +84,7 @@ export default memo(function CanvasOverview({ nodes, selectedId, canvasRef, onNa
         '--overview-tooltip-width': `${tooltipWidth}px`,
         '--overview-tooltip-left': `${Math.min(0, width - item.x - tooltipWidth - 12)}px`,
         '--overview-tooltip-height': `${Math.max(80, Math.min(280, height - item.y - item.height < 140 ? Math.max(item.y - 20, height - item.y - item.height - 20) : height - item.y - item.height - 20))}px` }}
-      aria-label={`${item.label} 확대해서 보기`} aria-describedby={`overview-description-${item.id}`}
+      aria-label={`${item.label} ${actionLabel}`} aria-describedby={`overview-description-${item.id}`}
       onFocus={() => setFocusedId(item.id)} onBlur={() => setFocusedId(null)}
       onPointerDown={(event) => event.stopPropagation()}
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}

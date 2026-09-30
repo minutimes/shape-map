@@ -15,6 +15,16 @@ improve next. The interface is Korean-first.
 - **System composition** — see the features grouped into product areas.
 - **Product shape** — read each feature through its user experience and result.
 
+Composition cards can contain more cards at any depth. Expand them in place;
+click a card to read its details. Recorded arrows show processing, data transfer,
+dependencies, and model roles. Connections can be inspected and edited in the
+feature's **연결** tab. Reading selectors come from the map itself: video formats,
+model roles, and custom logic can be described without hardcoding a product's
+rules into the application. Selections explain the saved design and do not
+change the running product's configuration.
+
+![Nested feature composition](docs/shape-map/nested-cards.jpg)
+
 The infinite canvas uses a quiet monochrome palette. Color carries meaning:
 
 | Color | Meaning | Source |
@@ -77,7 +87,8 @@ npm run dev
 ```
 
 The map must use the supported Mermaid subset. The main file is authoritative
-for structure, descriptions, proposals, comments, and turns. Its `.view.json`
+for structure, connections, reading conditions, descriptions, proposals,
+comments, and turns. Its `.view.json`
 companion stores canvas position, viewport, and fold state only. Each feature
 can list related source paths; the repository history panel connects actual
 changed files to those features. A code commit is distinct from a product turn

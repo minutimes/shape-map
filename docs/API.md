@@ -58,6 +58,11 @@ default 4317 demo until that process is stopped.
 `POST /api/mutations` accepts `{ "baseRevision", "clientId", "operation" }`.
 Supported operations:
 
+Product connections and reading lenses also accept `upsertLink`, `removeLink`,
+`setMapLinks`, and `setMapLenses`; see their schemas in
+[the Shape map contract](SHAPE-MAP.md). `restoreNodes` may include `links` and
+`lenses` to restore pruned relationship metadata when undoing a subtree deletion.
+
 - `addNode`: `{ "type", "id?", "parentId", "label", "shape", "category", "layout?", "section?", "task?", "proposal?", "workflow?" }`; `section`, when present, must be `"reference"`.
 - `renameNode`: `{ "type", "id", "label" }`
 - `moveNode`: `{ "type", "id", "parentId", "order?" }`
@@ -130,8 +135,10 @@ disk write, and SSE emission.
 ## View state
 
 `PUT /api/view` accepts `{ "clientId", "baseRevision", "patch" }`, where the
-patch may contain `positions`, `collapsedIds`, `viewport`, or
-`workflow: { collapsedIds?, viewport? }`. It updates only the non-authoritative
+patch may contain `positions`, `collapsedIds`, `viewport`,
+`workflow: { collapsedIds?, viewport? }`, or
+`shape: { layoutVersion?: 2, positions?, collapsedIds?, viewport? }`.
+It updates only the non-authoritative
 sibling `*.view.json`, merging position keys for stable IDs. Workflow navigation
 is merged at both nested levels and remains independent of the legacy flat
 collapse and viewport values. Old views omit `workflow` until it is explicitly

@@ -19,6 +19,18 @@ async function fixture(options = {}) {
 afterEach(async () => { while (cleanups.length) await cleanups.pop()(); });
 
 describe('MapStore', () => {
+  it('upgrades nested canvas navigation without retaining obsolete placement or changing source', async () => {
+    const { store } = await fixture(); const before = store.getSnapshot();
+    await store.updateView({ baseRevision: before.revision, clientId: 'old-canvas', patch: {
+      positions: { live: { x: 12, y: 34 } }, viewport: { x: 5, y: 6, zoom: .7 },
+      shape: { positions: { live: { x: 5000, y: 8000 } }, viewport: { x: -900, y: -1500, zoom: .2 } },
+    } });
+    const upgraded = await store.updateView({ baseRevision: before.revision, clientId: 'nested-canvas', patch: { shape: { layoutVersion: 2, collapsedIds: ['live'] } } });
+    expect(upgraded.revision).toBe(before.revision);
+    expect(upgraded.view).toMatchObject({ positions: { live: { x: 12, y: 34 } }, viewport: { x: 5, y: 6, zoom: .7 }, shape: { layoutVersion: 2, collapsedIds: ['live'] } });
+    expect(upgraded.view.shape).not.toHaveProperty('viewport');
+    expect(upgraded.view.shape).not.toHaveProperty('positions');
+  });
   it('rejects stale revisions and preserves unrelated nodes during a mutation', async () => {
     const { store, mapPath } = await fixture();
     const before = store.getSnapshot();

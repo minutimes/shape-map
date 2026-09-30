@@ -43,30 +43,43 @@ export function StateBadge({ status = 'neutral', compact = false }) {
   return <span className={`sm-state sm-state--${status}`}><span className="sm-state__dot" />{compact ? state.short : state.label}</span>;
 }
 
+const executorLabel = { code: '코드', perception: '음성·문자 인식', llm: '추론·생성 모델', jev: '구조화 판단 모델', human: '사람' };
+function Ports({ vertical = false }) {
+  return <><Handle id="in" type="target" position={Position.Left} className="sm-handle" />
+    <Handle id="out" type="source" position={vertical ? Position.Left : Position.Right} className="sm-handle" />
+    <Handle id="top" type="target" position={Position.Top} className="sm-handle" />
+    <Handle id="bottom" type="source" position={Position.Bottom} className="sm-handle" /></>;
+}
+
+function FeatureHints({ node, reading }) {
+  return <span className="sm-feature-hints">{node.task?.executor && <span title={[node.task.executor.model, node.task.executor.effort].filter(Boolean).join(' / ')}>{executorLabel[node.task.executor.kind]}</span>}
+    {reading?.custom && <span>형식별 로직</span>}{reading?.pending && <span>설계·미연결</span>}{node.task?.condition && <span title={node.task.condition}>조건 있음</span>}</span>;
+}
+
 export const ShapeBlock = memo(function ShapeBlock({ data, selected }) {
   const { node, state, mode, childCount } = data;
   const description = mode === 'product' ? node.task?.ui || node.task?.outputs || node.block?.summary || node.task?.logic
     : node.block?.summary || node.task?.logic;
   return <div className={`sm-block sm-block--${state.status}${selected ? ' is-selected' : ''}`} data-testid={`shape-block-${node.id}`}>
-    <Handle type="target" position={Position.Left} className="sm-handle" />
+    <Ports vertical={data.verticalHierarchy} />
     <div className="sm-block__top"><StateBadge status={state.status} compact />
       {state.commentCount > 0 && <span className="sm-block__comments" aria-label={`의견 ${state.commentCount}개`}><ShapeIcon name="comment" size={12} />{state.commentCount}</span>}
+      <FeatureHints node={node} reading={data.reading} />
     </div>
     <button className="sm-block__title nodrag" onClick={(event) => { event.stopPropagation(); data.onOpen(node.id); }}>{node.label}</button>
     {description && <p className="sm-block__description">{description}</p>}
     {childCount > 0 && <button className="sm-block__deeper nodrag" aria-label={`${node.label} 내부 ${childCount}개 보기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><span>내부 {childCount}개</span><ShapeIcon name="chevron" size={11} /></button>}
-    <Handle type="source" position={data.verticalHierarchy ? Position.Left : Position.Right} className="sm-handle" />
   </div>;
 });
 
 export const ShapeGroup = memo(function ShapeGroup({ data, selected }) {
   const { node, state, index, childCount } = data;
-  return <div className={`sm-group${selected ? ' is-selected' : ''}`} data-testid={`shape-group-${node.id}`}>
-    <div className="sm-group__header"><span className="sm-group__index">{String(index).padStart(2, '0')}</span>
-      <button className="sm-group__title nodrag" onClick={(event) => { event.stopPropagation(); data.onOpen(node.id); }}>{node.label}</button>
-      <StateBadge status={state.status} compact />
-      {childCount > 0 && <button className="sm-icon-button sm-group__focus nodrag" aria-label={`${node.label} 안으로 들어가기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><ShapeIcon name="expand" size={14} /></button>}
-    </div>
+  return <div className={`sm-group sm-group--${state.status} sm-group--depth-${data.depth || 0}${selected ? ' is-selected' : ''}${data.collapsed ? ' is-collapsed' : ''}`} data-testid={`shape-group-${node.id}`}>
+    <Ports />
+    <div className="sm-group__header"><span className="sm-group__index">{data.depth ? `내부 ${childCount}개` : String(index).padStart(2, '0')}</span><StateBadge status={state.status} compact /><FeatureHints node={node} reading={data.reading} />
+      {childCount > 0 && <button className="sm-icon-button sm-group__fold nodrag" aria-label={`${node.label} ${data.collapsed ? '내부 펼치기' : '내부 접기'}`} aria-expanded={!data.collapsed} onClick={(event) => { event.stopPropagation(); data.onToggle(node.id); }}><ShapeIcon name={data.collapsed ? 'plus' : 'minus'} size={14} /></button>}
+      <button className="sm-icon-button sm-group__focus nodrag" aria-label={`${node.label} 안으로 들어가기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><ShapeIcon name="expand" size={14} /></button>
+    </div><button className="sm-group__title nodrag" onClick={(event) => { event.stopPropagation(); data.onOpen(node.id); }}>{node.label}</button>
     {node.block?.summary || node.task?.logic ? <p className="sm-group__description">{node.block?.summary || node.task.logic}</p> : null}
     {!childCount && <p className="sm-group__empty">이 기능을 눌러 설명과 의견을 남겨 보세요.</p>}
   </div>;

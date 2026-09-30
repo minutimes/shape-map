@@ -21,6 +21,16 @@ function shapeBrief(snapshot) {
     '',
   ];
   const graph = snapshot.graph;
+  if (graph.links?.length) {
+    lines.push('기능 사이의 연결:');
+    graph.links.forEach((link) => lines.push(`- [${link.source}] → [${link.target}]: ${link.label}${link.condition ? ` / 조건: ${link.condition}` : ''}`));
+    lines.push('');
+  }
+  for (const lens of graph.lenses || []) {
+    lines.push(`${lens.label}별 구성 (설명용 선택이며 실행 설정을 바꾸지 않음):`);
+    lens.options.forEach((option) => lines.push(`- ${option.label}: ${option.description || ''} / 관련 기능: ${option.roots.join(', ')}${option.custom?.length ? ` / 고유 로직: ${option.custom.join(', ')}` : ''}${option.pending?.length ? ` / 설계·미연결: ${option.pending.join(', ')}` : ''}`));
+    lines.push('');
+  }
   for (const node of graph.nodes) {
     const state = getBlockState(graph, node);
     lines.push(`[${node.id}] ${node.label}`);

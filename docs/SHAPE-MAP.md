@@ -29,6 +29,38 @@ optional `summary`, `createdAt`, source `revision`, `nodes`, `categories`, and
 optional map `settings`. Snapshots include review/comments without nested history.
 Viewing a turn never restores it over the working graph.
 
+`%% sm-link: JSON` records a cross-feature connection:
+
+```json
+{"id":"speech_to_render","source":"speech","target":"render","kind":"data","label":"Timed speech","condition":"When the user approves the selection"}
+```
+
+`id`, `source`, and `target` are stable identifiers; endpoints must exist and
+must differ. `kind` is `flow`, `data`, `dependency`, or `activation`. `label` is
+required (up to 180 characters); `condition` is optional (up to 4,000). Connection
+cycles are allowed without changing the single-parent hierarchy. Up to 4,000
+connections are supported. Duplicate IDs and unknown properties are rejected.
+
+`%% sm-lens: JSON` defines a map-authored reading selector:
+
+```json
+{"id":"format","label":"Video format","options":[{"id":"spoken","label":"Spoken video","description":"Features used for speech-led editing","roots":["speech","render"],"exclude":[],"custom":["speech"],"pending":[]}]}
+```
+
+An option includes all descendants of its `roots`, subtracts `exclude` branches,
+and can mark `custom` branches as specific logic and `pending` branches as planned
+or unconnected. Ancestor containers remain readable. Multiple selected lenses
+intersect their scopes. Selectors highlight saved design; they never enable a
+provider or change execution settings. The product contains no hardcoded video
+formats or model names. Up to 20 lenses with 1–32 unique options each are allowed;
+each ID list contains at most 2,000 existing features.
+
+Turn snapshots also capture optional `links` and `lenses`. Deleting a subtree
+prunes dangling endpoints and option references; hierarchy-editor undo restores
+them along with the deleted cards.
+Undo merges only references to restored cards and preserves newer unrelated
+connections and reading-option text.
+
 ## Derived colors
 
 Red proposals take priority. An unresolved concern gives yellow. A verified state
@@ -37,7 +69,7 @@ between the last two completed turns, only while the live feature still matches
 the last recorded turn. The first turn does not invent previous changes.
 
 Fingerprints cover a feature's label, parent, task, proposal, workflow, description,
-source paths, and immediate child IDs. Comments and review markers do not count
+source paths, immediate child IDs, and incident connections. Comments and review markers do not count
 as implementation changes. A change to the feature invalidates its prior review.
 
 ## API and AI use
@@ -57,6 +89,10 @@ and one `operation`. Additions:
 | `setProposal` | `id`, `proposal` or `null`, optional `expectedFingerprint` |
 | `applyProposal` | `id` |
 | `createTurn` | `title`, optional `summary` |
+| `upsertLink` | `link` object |
+| `removeLink` | connection `id` |
+| `setMapLinks` | complete `links` array or `null` |
+| `setMapLenses` | complete `lenses` array or `null` |
 
 `addNode` accepts optional block metadata. `renameNode` supports the same optional
 fingerprint guard. A stale same-feature form returns HTTP 409 `field_conflict`;
@@ -83,10 +119,17 @@ authoring channel; its declarations are descriptions, not verified runtime proof
 
 ## Canvas and durability
 
-`PUT /api/view` accepts `patch.shape` with positions, viewport, and fold state.
+`PUT /api/view` accepts `patch.shape` with positions, viewport, fold state, and
+`layoutVersion: 2` for the nested composition layout. Upgrading resets outdated
+composition positions and viewport, preserving legacy editor navigation.
 It is independent of legacy structure/workflow navigation and contains no semantic
 data. Dragging a composition area repositions its child cards without reparenting.
-Function hierarchy is deliberately progressive: enter a feature to see its parts.
+Composition and product views recursively nest cards, with wrapped full titles.
+The fold button expands parts on the same canvas. Card clicks open details;
+the separate focus button enters an area. Connections between containers attach
+to their boundaries by default; the detailed-connections control exposes their
+saved endpoints. Only an explicit sequence or recorded connection creates a
+flow arrow. Function hierarchy is progressive: enter a feature to see its parts.
 Small screens use one column and readable initial zoom. Overview titles remain
 readable while zoomed out.
 

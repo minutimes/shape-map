@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Background, BackgroundVariant, MiniMap, ReactFlow, applyNodeChanges, useReactFlow } from '@xyflow/react';
 import { mutateMap, readMap, saveView } from './api.js';
 import { compareTurnGraphs, getBlockState, nodeFingerprint } from '../lib/shape.mjs';
-import { shapeAncestors, shapeLayout, SHAPE_VIEWS, turnGraph } from './shapeLayout.js';
+import { readingStates } from '../lib/diagram.mjs';
+import { absoluteShapePosition, defaultShapeCollapsed, shapeAncestors, shapeLayout, SHAPE_VIEWS, turnGraph } from './shapeLayout.js';
 import { ShapeBlock, ShapeGroup, ShapeIcon, StateBadge, SHAPE_STATES } from './ShapeNode.jsx';
 import { blockDraftValues, BLOCK_DRAFT_FIELDS, draftConflicts, reconcileDraft } from './shapeDraft.js';
 import CanvasOverview from './CanvasNavigation.jsx';
@@ -42,7 +43,10 @@ function Dialog({ title, subtitle, children, onClose, wide = false }) {
   </div>;
 }
 
-function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, send, busy, onClose, onFocus }) {
+const LINK_KINDS = { flow: '처리 순서', data: '자료 전달', dependency: '필요한 기능', activation: '모델 역할' };
+const EXECUTORS = { code: '코드로 처리', perception: '음성·문자 인식', llm: '추론·생성 모델', jev: '구조화 판단 모델', human: '사람이 판단' };
+
+function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, send, busy, onClose, onOpen }) {
   const [tab, setTab] = useState('overview');
   const draftKey = `shape-map:draft:${mapPath}:${node.id}`;
   const initial = blockDraftValues(node);
@@ -55,6 +59,8 @@ function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, s
   const [editing, setEditing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [draftWarning, setDraftWarning] = useState(false);
+  const [linkDraft, setLinkDraft] = useState({ id: `link_${crypto.randomUUID().replaceAll('-', '_')}`, target: '', kind: 'data', label: '', condition: '' });
+  const [targetSearch, setTargetSearch] = useState('');
   const dirty = draft.comment || BLOCK_DRAFT_FIELDS.some((field) => draft[field] !== base[field]);
   useEffect(() => {
     const next = reconcileDraft(draft, base, initial);
@@ -89,11 +95,12 @@ function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, s
   }
   const comments = node.block?.comments || [];
   const children = graph.nodes.filter((item) => item.parentId === node.id && item.section !== 'reference');
+  const links = (graph.links || []).filter((link) => link.source === node.id || link.target === node.id);
   return <aside className="sm-inspector" aria-label="기능 블록 상세" data-testid="shape-inspector">
     <header className="sm-inspector__heading"><span className="sm-eyebrow">기능 블록</span><button className="sm-icon-button" aria-label="기능 상세 닫기" onClick={onClose}><ShapeIcon name="close" /></button></header>
     <h2>{node.label}</h2><StateBadge status={state.status} />
     <div className="sm-inspector-tabs" role="tablist" aria-label="기능 정보">
-      {[['overview', '개요'], ['comments', `의견${comments.length ? ` ${comments.length}` : ''}`], ['proposal', '다음 변경안']].map(([id, label]) =>
+      {[['overview', '개요'], ['links', `연결${links.length ? ` ${links.length}` : ''}`], ['comments', `의견${comments.length ? ` ${comments.length}` : ''}`], ['proposal', '다음 변경안']].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} aria-controls={`sm-inspector-panel-${id}`} onClick={() => setTab(id)}>{label}</button>)}
     </div>
     <div className="sm-inspector__body" role="tabpanel" id={`sm-inspector-panel-${tab}`}>
@@ -112,13 +119,16 @@ function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, s
           {state.status === 'changed' && <section className="sm-change-comparison"><h3><ShapeIcon name="history" size={13} />직전 턴에서 달라진 점</h3>
             {baselineNode ? <><small>이전 형상</small><p>{baselineNode.block?.summary || baselineNode.task?.logic || baselineNode.label}</p><small>이번 형상</small><p>{node.block?.summary || node.task?.logic || node.label}</p></> : <p>이 턴에 새로 추가한 기능입니다.</p>}
           </section>}
-          {(node.task?.inputs || node.task?.outputs || node.task?.ui) && <dl className="sm-io">
+          {(node.task?.inputs || node.task?.outputs || node.task?.ui || node.task?.condition || node.task?.executor) && <dl className="sm-io">
             {node.task.inputs && <div><dt>들어오는 것</dt><dd>{node.task.inputs}</dd></div>}
             {node.task.outputs && <div><dt>만들어지는 것</dt><dd>{node.task.outputs}</dd></div>}
             {node.task.ui && <div><dt>사용자 경험</dt><dd>{node.task.ui}</dd></div>}
+            {node.task.condition && <div><dt>언제 사용하는 기능인가요?</dt><dd>{node.task.condition}</dd></div>}
+            {node.task.executor && <div><dt>누가 처리하나요?</dt><dd>{EXECUTORS[node.task.executor.kind]}{node.task.executor.model && <small className="sm-executor-model">지도에 기록된 모델 · {node.task.executor.model}{node.task.executor.effort ? ` / ${node.task.executor.effort}` : ''}</small>}</dd></div>}
           </dl>}
           {node.proposal && <button className="sm-proposal-preview" onClick={() => setTab('proposal')}><span><ShapeIcon name="arrow" size={14} />다음에 바꿀 내용</span><strong>{node.proposal.reason || node.proposal.logic || '작성한 변경안을 확인하세요.'}</strong><ShapeIcon name="chevron" size={14} /></button>}
-          {children.length > 0 && <section className="sm-inspector__children"><h3>함께 구성하는 기능</h3>{children.map((child) => <button key={child.id} onClick={() => onFocus(node.id)}><ShapeIcon name="box" size={14} /><span>{child.label}</span><ShapeIcon name="chevron" size={13} /></button>)}</section>}
+          {children.length > 0 && <section className="sm-inspector__children"><h3>이 안에 들어있는 기능</h3>{children.map((child) => <button key={child.id} onClick={() => onOpen(child.id)}><ShapeIcon name="box" size={14} /><span>{child.label}</span><ShapeIcon name="chevron" size={13} /></button>)}</section>}
+          {links.length > 0 && <button className="sm-button sm-inspector-link-button" onClick={() => setTab('links')}><ShapeIcon name="branch" size={14} />이 기능과 연결된 기능 {links.length}개</button>}
           {node.block?.files?.length > 0 && <details className="sm-file-details"><summary><ShapeIcon name="code" size={14} />연결된 코드 {node.block.files.length}개</summary>{node.block.files.map((file) => <code key={file}>{file}</code>)}</details>}
           {!readOnly && <section className="sm-review-section"><h3>직접 확인했나요?</h3><p>확인한 내용이 바뀌면 검수를 다시 요청합니다.</p>
             {state.status === 'verified' ? <button className="sm-button sm-button--verified" disabled={busy} onClick={() => send({ type: 'setBlock', id: node.id, block: { status: 'neutral' } })}><ShapeIcon name="check" size={15} />검수 완료 · 되돌리기</button>
@@ -126,6 +136,19 @@ function BlockInspector({ node, graph, baselineNode, state, readOnly, mapPath, s
             {node.proposal && <small>변경안을 정리한 뒤 검수할 수 있습니다.</small>}
           </section>}
         </>}
+      </>}
+      {tab === 'links' && <>
+        <p className="sm-tab-intro">큰 카드 안의 카드는 소속입니다. 화살표는 기능 사이에 오가는 자료와 처리 순서를 보여줍니다.</p>
+        <div className="sm-connection-list">{links.length ? links.map((link) => {
+          const outgoing = link.source === node.id;
+          const other = graph.nodes.find((item) => item.id === (outgoing ? link.target : link.source));
+          return <article key={link.id}><header><span>{LINK_KINDS[link.kind]}</span><small>{outgoing ? '이 기능에서 전달' : '이 기능으로 전달'}</small></header><button onClick={() => onOpen(other.id)}><ShapeIcon name={outgoing ? 'arrow' : 'back'} size={14} /><strong>{other.label}</strong></button><p>{link.label}</p>{link.condition && <small className="sm-connection-condition">{link.condition}</small>}{!readOnly && <button className="sm-text-button" disabled={busy} onClick={() => send({ type: 'removeLink', id: link.id })}>연결 해제</button>}</article>;
+        }) : <p className="sm-tab-intro">아직 연결을 기록하지 않았습니다.</p>}</div>
+        {!readOnly && <form className="sm-form sm-link-composer" onSubmit={async (event) => {
+          event.preventDefault();
+          const { condition, ...link } = linkDraft;
+          if (await send({ type: 'upsertLink', link: { ...link, source: node.id, label: linkDraft.label.trim(), ...(condition.trim() ? { condition: condition.trim() } : {}) } })) setLinkDraft({ id: `link_${crypto.randomUUID().replaceAll('-', '_')}`, target: '', kind: 'data', label: '', condition: '' });
+        }}><h3>다른 기능과 연결하기</h3><label>연결할 기능 찾기<input value={targetSearch} onChange={(event) => setTargetSearch(event.target.value)} placeholder="기능 이름으로 좁혀 보세요" /></label><label>어느 기능으로 이어지나요?<select required value={linkDraft.target} onChange={(event) => setLinkDraft((value) => ({ ...value, target: event.target.value }))}><option value="">기능 선택</option>{graph.nodes.filter((item) => item.id !== node.id && item.section !== 'reference' && (item.id === linkDraft.target || item.label.toLowerCase().includes(targetSearch.trim().toLowerCase()))).map((item) => <option key={item.id} value={item.id}>{item.label}{item.parentId ? ` · ${graph.nodes.find((parent) => parent.id === item.parentId)?.label}` : ''}</option>)}</select></label><label>어떤 관계인가요?<select value={linkDraft.kind} onChange={(event) => setLinkDraft((value) => ({ ...value, kind: event.target.value }))}>{Object.entries(LINK_KINDS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label>무엇을 전달하거나 함께 하나요?<input value={linkDraft.label} onChange={(event) => setLinkDraft((value) => ({ ...value, label: event.target.value }))} placeholder="예: 확인한 컷 목록을 편집 단계로 전달" maxLength={180} required /></label><label>언제 연결되나요? <span className="sm-field-optional">선택</span><textarea rows={2} value={linkDraft.condition} onChange={(event) => setLinkDraft((value) => ({ ...value, condition: event.target.value }))} maxLength={4000} /></label><button className="sm-button sm-button--dark" disabled={busy || !linkDraft.target || !linkDraft.label.trim()}><ShapeIcon name="plus" size={14} />연결 저장</button></form>}
       </>}
       {tab === 'comments' && <>
         <p className="sm-tab-intro">이 기능을 보며 든 생각을 남겨 주세요. 걱정되는 점은 지도에 노란색으로 표시됩니다.</p>
@@ -165,7 +188,7 @@ export default function ShapeWorkspace() {
   const busyRef = useRef(false);
   const [toast, setToast] = useState(null);
   const [mode, setMode] = useState('system');
-  const [focusId, setFocusId] = useState(null);
+  const [focusId, setFocusId] = useState(() => new URLSearchParams(window.location.search).get('focus'));
   const [selectedId, setSelectedId] = useState(null);
   const [turnId, setTurnId] = useState(null);
   const [playing, setPlaying] = useState(false);
@@ -185,6 +208,11 @@ export default function ShapeWorkspace() {
   const [nodes, setNodes] = useState([]);
   const [zoom, setZoom] = useState(1);
   const [viewPositions, setViewPositions] = useState({});
+  const [collapsedIds, setCollapsedIds] = useState(null);
+  const [lensSelections, setLensSelections] = useState({});
+  const [showActivation, setShowActivation] = useState(false);
+  const [detailedLinks, setDetailedLinks] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const clientId = useRef(`shape-${crypto.randomUUID()}`);
   const viewTimer = useRef(null);
   const canvasRef = useRef(null);
@@ -197,6 +225,10 @@ export default function ShapeWorkspace() {
     const change = () => { setCompact(media.matches); setSingleColumn(tablet.matches); setViewPositions({}); };
     media.addEventListener('change', change); tablet.addEventListener('change', change);
     return () => { media.removeEventListener('change', change); tablet.removeEventListener('change', change); };
+  }, []);
+  useEffect(() => {
+    const resize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize);
   }, []);
   useEffect(() => {
     let disposed = false;
@@ -247,17 +279,35 @@ export default function ShapeWorkspace() {
   }, [graph, previousTurn, selectedTurn]);
   const totals = Object.keys(SHAPE_STATES).reduce((result, status) => ({ ...result, [status]: Object.values(states).filter((state) => state.status === status).length }), {});
   const currentFocus = graph?.nodes.find((node) => node.id === focusId) || root;
+  const reading = useMemo(() => graph ? readingStates(graph, lensSelections) : {}, [graph, lensSelections]);
   const openNode = useCallback((id) => { setSelectedId(id); setSidebarOpen(false); }, []);
-  const focusNode = useCallback((id) => { setFocusId(id); setSelectedId(null); setViewPositions({}); setSidebarOpen(false); }, []);
+  const focusNode = useCallback((id) => {
+    setFocusId(id); setSelectedId(null); setViewPositions({}); setCollapsedIds(null); setSidebarOpen(false);
+    const url = new URL(window.location.href);
+    const rootId = snapshotRef.current?.graph.nodes.find((node) => !node.parentId)?.id;
+    id === rootId ? url.searchParams.delete('focus') : url.searchParams.set('focus', id);
+    window.history.replaceState(null, '', url);
+  }, []);
+  const toggleNode = useCallback((id) => {
+    const collapsed = new Set(collapsedIds || defaultShapeCollapsed(graph, currentFocus.id));
+    collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+    const next = [...collapsed]; setCollapsedIds(next); persistView({ collapsedIds: next });
+  }, [collapsedIds, graph, currentFocus?.id, turnId]);
+  function showDepth(levels) {
+    const depth = shapeAncestors(graph, currentFocus.id).length;
+    const parents = new Set(graph.nodes.map((node) => node.parentId));
+    const next = graph.nodes.filter((node) => parents.has(node.id) && shapeAncestors(graph, node.id).length >= depth + levels).map((node) => node.id);
+    setCollapsedIds(next); persistView({ collapsedIds: next });
+  }
   const layout = useMemo(() => graph ? shapeLayout(graph, { focusId: currentFocus?.id, mode,
-    positions: mode === 'function' || singleColumn ? {} : viewPositions, states, onOpen: openNode, onFocus: focusNode, compact, singleColumn }) : { nodes: [], edges: [] },
-  [graph, currentFocus?.id, mode, viewPositions, states, openNode, focusNode, compact, singleColumn]);
+    positions: mode === 'function' || singleColumn ? {} : viewPositions, states, onOpen: openNode, onFocus: focusNode, onToggle: toggleNode, collapsedIds, reading, showActivation, detailedLinks,
+    availableWidth: windowWidth - (windowWidth > 1400 ? 225 : windowWidth > 1080 ? 208 : windowWidth > 850 ? 183 : 0), compact, singleColumn }) : { nodes: [], edges: [] },
+  [graph, currentFocus?.id, mode, viewPositions, states, openNode, focusNode, toggleNode, collapsedIds, reading, showActivation, detailedLinks, compact, singleColumn, windowWidth]);
   useEffect(() => setNodes(layout.nodes.map((node) => ({ ...node, selected: node.id === selectedId,
-    className: filter && node.data.state.status !== filter ? 'sm-node-muted' : '' }))), [layout, selectedId, filter]);
+    className: (filter && node.data.state.status !== filter) || reading[node.id]?.active === false ? 'sm-node-muted' : '' }))), [layout, selectedId, filter, reading]);
   const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}`;
   const overviewNodes = useMemo(() => nodes.map((node) => {
-    const parent = node.parentId ? nodes.find((item) => item.id === node.parentId) : null;
-    return { ...node, position: { x: node.position.x + (parent?.position.x || 0), y: node.position.y + (parent?.position.y || 0) },
+    return { ...node, position: absoluteShapePosition(nodes, node.id),
       data: { ...node.data, label: node.data.node.label, parentId: node.data.node.parentId,
         depth: shapeAncestors(graph, node.id).length - 1, path: shapeAncestors(graph, node.id).map((item) => item.label),
         layout: { width: node.style.width, height: node.style.height } } };
@@ -265,32 +315,26 @@ export default function ShapeWorkspace() {
   useEffect(() => {
     if (!snapshot || restoredMap.current === snapshot.mapPath) return;
     restoredMap.current = snapshot.mapPath;
-    setViewPositions(snapshot.view?.shape?.positions || {});
+    if (snapshot.view?.shape?.layoutVersion === 2) {
+      setViewPositions(snapshot.view.shape.positions || {});
+      if (!focusId) setCollapsedIds(snapshot.view.shape.collapsedIds || null);
+    }
   }, [snapshot]);
   useEffect(() => {
     if (!graph) return;
     const timer = setTimeout(() => {
-      const saved = !singleColumn && !turnId && mode === 'system' && currentFocus?.id === root?.id ? snapshotRef.current?.view?.shape?.viewport : null;
+      const view = snapshotRef.current?.view?.shape;
+      const saved = view?.layoutVersion === 2 && !singleColumn && !turnId && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
       if (compact || (singleColumn && mode !== 'function')) {
-        const boardWidth = compact ? 340 : 476;
+        const boardWidth = compact ? 340 : 650;
         flow.setViewport({ x: Math.max(20, (window.innerWidth - boardWidth) / 2), y: 25, zoom: Math.min(1, (window.innerWidth - 40) / boardWidth) });
       }
-      else if (saved) flow.setViewport(saved); else flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 });
+      else if (saved) flow.setViewport(saved);
+      else if (mode === 'function') flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 });
+      else flow.setViewport({ x: 28, y: 28, zoom: .9 });
     }, 80);
     return () => clearTimeout(timer);
   }, [layoutKey, Boolean(graph)]);
-  useEffect(() => {
-    if (!selectedId || compact) return;
-    const timer = setTimeout(() => {
-      const node = flow.getNode(selectedId);
-      if (!node) return;
-      const parent = node.parentId ? flow.getNode(node.parentId) : null;
-      const x = (parent?.position.x || 0) + node.position.x + Number(node.style.width) / 2;
-      const y = (parent?.position.y || 0) + node.position.y + Number(node.style.height) / 2;
-      if (Number.isFinite(x) && Number.isFinite(y)) flow.setCenter(x, y, { zoom: Math.max(.9, flow.getZoom()), duration: reducedMotion() ? 0 : 140 });
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [selectedId, compact]);
   useEffect(() => {
     if (!playing) return;
     const timer = setInterval(() => {
@@ -315,7 +359,7 @@ export default function ShapeWorkspace() {
   async function persistView(patch) {
     if (turnId || !snapshotRef.current?.sourceStatus.valid) return;
     try {
-      const next = await saveView({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, patch: { shape: patch } });
+      const next = await saveView({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, patch: { shape: { layoutVersion: 2, ...patch } } });
       // A view save must not replace newer semantic edits delivered by SSE.
       if (next.revision === snapshotRef.current.revision) accept(next);
     } catch { /* Navigation remains usable; semantic drafts are saved separately. */ }
@@ -354,7 +398,7 @@ export default function ShapeWorkspace() {
     }
     if (saved) { setDialog(null); if (dialog === 'block') { focusNode(newParent); openNode(createdId); } }
   }
-  function chooseTurn(id) { setTurnId(id); setPlaying(false); setSelectedId(null); setViewPositions({}); }
+  function chooseTurn(id) { setTurnId(id); setPlaying(false); setSelectedId(null); setViewPositions({}); setCollapsedIds(null); }
   const results = search.trim() ? graph?.nodes.filter((node) => `${node.label} ${node.block?.summary || ''} ${node.task?.logic || ''}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 25) : [];
   if (!snapshot) return <main className="sm-loading"><span className="sm-logo" /><h1>shape map</h1><p>{connection === 'offline' ? '지도를 불러오지 못했습니다.' : '제품 지도를 펼치고 있습니다.'}</p>{connection === 'offline' && <button className="sm-button" onClick={() => window.location.reload()}>다시 연결</button>}</main>;
   return <main className={`shape-workspace${selected ? ' has-inspector' : ''}${selectedTurn ? ' is-history' : ''}`}>
@@ -385,6 +429,14 @@ export default function ShapeWorkspace() {
       <section className="sm-stage" aria-label="무한 캔버스 제품 지도">
         <div className="sm-stage-heading"><div className="sm-stage-heading__title"><button className="sm-icon-button sm-mobile-menu" aria-label="제품 탐색 열기" onClick={() => setSidebarOpen(true)}><ShapeIcon name="menu" /></button><div><nav className="sm-breadcrumb" aria-label="지도 경로">{shapeAncestors(graph, currentFocus.id).map((node, itemIndex) => <span key={node.id}>{itemIndex > 0 && <ShapeIcon name="chevron" size={10} />}<button onClick={() => focusNode(node.id)} aria-current={node.id === currentFocus.id ? 'location' : undefined}>{itemIndex === 0 ? '제품 전체' : node.label}</button></span>)}</nav><h1>{currentFocus.label}<span>{SHAPE_VIEWS.find((view) => view.id === mode).label}</span></h1></div></div><button className="sm-button" disabled={Boolean(turnId) || busy} onClick={() => openCreate('block')}><ShapeIcon name="plus" size={15} /><span>기능 추가</span></button></div>
         <div className="sm-status-legend" aria-label="상태별 기능 필터"><span className="sm-legend-label">색으로 읽기</span>{Object.entries(SHAPE_STATES).filter(([status]) => status !== 'neutral').map(([status, state]) => <button key={status} className={`sm-legend-item sm-legend-item--${status}`} aria-pressed={filter === status} onClick={() => setFilter(filter === status ? null : status)}><span className="sm-state__dot" />{state.label}<b>{totals[status]}</b></button>)}{filter && <button className="sm-filter-clear" onClick={() => setFilter(null)}><ShapeIcon name="close" size={12} />필터 해제</button>}</div>
+        <div className="sm-diagram-tools" aria-label="기능 구성과 조건">
+          <div className="sm-depth-tools"><span>구성 깊이</span><button onClick={() => showDepth(1)}>큰 기능</button><button onClick={() => showDepth(3)}>세부 기능</button><button onClick={() => showDepth(Infinity)}>모두 펼치기</button></div>
+          {(graph.lenses || []).map((lens) => <label className="sm-lens-select" key={lens.id}><span>{lens.label}</span><select aria-label={lens.label} value={lensSelections[lens.id] || ''} onChange={(event) => setLensSelections((value) => ({ ...value, [lens.id]: event.target.value }))}><option value="">전체</option>{lens.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>)}
+          {(graph.links || []).some((link) => link.kind === 'activation') && <button className="sm-model-lines" aria-pressed={showActivation} onClick={() => setShowActivation(!showActivation)}><ShapeIcon name="branch" size={13} />모델 연결선</button>}
+          {(graph.links || []).length > 0 && <button className="sm-model-lines" aria-pressed={detailedLinks} onClick={() => setDetailedLinks(!detailedLinks)}><ShapeIcon name="branch" size={13} />세부 연결선</button>}
+          <span className="sm-connection-key"><i />흐름<span>┄</span>자료·조건</span>
+        </div>
+        {(graph.lenses || []).some((lens) => lensSelections[lens.id]) && <div className="sm-lens-description" role="status"><ShapeIcon name="branch" size={13} /><span>{graph.lenses.map((lens) => lens.options.find((option) => option.id === lensSelections[lens.id])?.description).filter(Boolean).join(' · ')}<small>지도에 기록된 관련 기능을 강조합니다.</small></span><button onClick={() => setLensSelections({})}>선택 해제</button></div>}
         <div className="sm-canvas" data-testid="shape-canvas" ref={canvasRef}>
           <ReactFlow nodes={nodes} edges={layout.edges} nodeTypes={nodeTypes} minZoom={.2} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch zoomActivationKeyCode="Meta" panOnDrag selectionOnDrag={false} nodesConnectable={false} deleteKeyCode={null} colorMode="light"
             onNodesChange={(changes) => setNodes((current) => applyNodeChanges(changes, current))}
@@ -400,11 +452,11 @@ export default function ShapeWorkspace() {
             }}
             fitViewOptions={{ padding: .09, maxZoom: 1.15 }}>
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d7d7dc" />
-            <CanvasOverview nodes={overviewNodes} selectedId={selectedId} canvasRef={canvasRef} busy={busy} onNavigate={(id) => openNode(id)} />
+            <CanvasOverview nodes={overviewNodes} selectedId={selectedId} canvasRef={canvasRef} busy={busy} onNavigate={(id) => openNode(id)} actionLabel="상세 보기" />
             {minimap && <MiniMap pannable zoomable nodeColor={(node) => ({ planned: '#e36a69', verified: '#6baf86', changed: '#719ddc', concern: '#d3af5a' }[node.data.state?.status] || '#dedee2')} />}
           </ReactFlow>
           {selectedTurn && <div className="sm-replay-badge"><ShapeIcon name="history" size={14} />턴 {selectedTurn.number} · {selectedTurn.title}<button onClick={() => chooseTurn(null)}>현재로 돌아가기<ShapeIcon name="arrow" size={13} /></button></div>}
-          <div className="sm-canvas-bottom"><span className="sm-canvas-tip">{mode === 'function' ? '선은 기능의 소속을 나타냅니다' : mode === 'product' ? '같은 기능을 사용자 경험으로 읽습니다' : '영역을 움직여 배치 · 기능을 눌러 의견 남기기'}</span><div className="sm-zoom"><button aria-label="지도 축소" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="minus" size={14} /></button><button className="sm-zoom-value" aria-label="지도 100%로 보기" onClick={() => flow.zoomTo(1)}>{Math.round(zoom * 100)}%</button><button aria-label="지도 확대" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="plus" size={14} /></button><span /><button aria-label="지도 화면에 맞추기" onClick={() => flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 })}><ShapeIcon name="expand" size={14} /></button><button aria-label="미니맵 보기" aria-pressed={minimap} onClick={() => setMinimap(!minimap)}><ShapeIcon name="grid" size={14} /></button></div></div>
+          <div className="sm-canvas-bottom"><span className="sm-canvas-tip">{mode === 'function' ? '선은 기능의 소속을 나타냅니다' : '카드 안은 소속 · 화살표는 연결 · +로 내부 펼치기'}</span><div className="sm-zoom"><button aria-label="지도 축소" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="minus" size={14} /></button><button className="sm-zoom-value" aria-label="지도 100%로 보기" onClick={() => flow.zoomTo(1)}>{Math.round(zoom * 100)}%</button><button aria-label="지도 확대" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="plus" size={14} /></button><span /><button aria-label="지도 화면에 맞추기" onClick={() => flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 })}><ShapeIcon name="expand" size={14} /></button><button aria-label="미니맵 보기" aria-pressed={minimap} onClick={() => setMinimap(!minimap)}><ShapeIcon name="grid" size={14} /></button></div></div>
         </div>
         <footer className="sm-timeline" aria-label="개발 턴 타임라인">
           <div className="sm-timeline__heading"><div><ShapeIcon name="history" size={16} /><strong>{selectedTurn ? `턴 ${selectedTurn.number}` : '현재 형상'}</strong><span>{selectedTurn ? selectedTurn.summary || selectedTurn.title : turns.length ? '지난 개선을 돌아보고, 다음 변화를 계획하세요.' : '첫 형상을 기록하면 개발 과정을 되짚을 수 있습니다.'}</span></div>{previousTurn && <button className="sm-turn-diff" onClick={() => setDialog('changes')}>변경 {diff.changedIds.length} · 추가 {diff.addedIds.length} · 제거 {diff.removedIds.length}</button>}<button className="sm-button sm-button--small" disabled={Boolean(turnId) || busy} onClick={() => openCreate('turn')}><ShapeIcon name="plus" size={13} />턴 기록</button></div>
@@ -414,7 +466,7 @@ export default function ShapeWorkspace() {
           {turns.length > 0 && <label className="sm-timeline-slider"><span className="sm-sr-only">보고 있는 개발 턴</span><input type="range" min="0" max={turns.length} value={index} onChange={(event) => chooseTurn(turns[Number(event.target.value)]?.id || null)} aria-valuetext={selectedTurn ? `턴 ${selectedTurn.number}: ${selectedTurn.title}` : '현재 형상'} /></label>}
         </footer>
       </section>
-      {selected && <BlockInspector key={`${turnId || 'current'}:${selected.id}`} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onFocus={focusNode} />}
+      {selected && <BlockInspector key={`${turnId || 'current'}:${selected.id}`} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={openNode} />}
     </div>
     {toast && <div className={`sm-toast${toast.error ? ' is-error' : ''}`} role={toast.error ? 'alert' : 'status'}>{!toast.error && <ShapeIcon name="check" size={15} />}<span>{toast.text}</span><button className="sm-icon-button" aria-label="알림 닫기" onClick={() => setToast(null)}><ShapeIcon name="close" size={14} /></button></div>}
     {(dialog === 'block' || dialog === 'turn') && <Dialog title={dialog === 'turn' ? '현재 형상을 턴으로 기록' : '새 기능 블록'} subtitle={dialog === 'turn' ? '지금의 설명·변경안·의견을 함께 남깁니다.' : '제품에서 하는 일을 쉬운 말로 적어 주세요.'} onClose={() => setDialog(null)}>

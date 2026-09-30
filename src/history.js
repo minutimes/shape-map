@@ -105,6 +105,8 @@ export function deletionHistoryEntry(snapshot, selectedIds) {
       type: 'restoreNodes',
       nodes: deletedNodes,
       order: nodes.map((node) => node.id),
+      ...(snapshot.graph.links !== undefined ? { links: clone(snapshot.graph.links) } : {}),
+      ...(snapshot.graph.lenses !== undefined ? { lenses: clone(snapshot.graph.lenses) } : {}),
     },
     redo: { type: 'deleteSubtrees', ids: roots },
     undoView: {

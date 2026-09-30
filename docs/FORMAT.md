@@ -10,8 +10,8 @@ operation has an honest text round trip.
 - Stable node identifiers matching `[A-Za-z][A-Za-z0-9_-]*`.
 - Rectangles: `id["label"]`; rounded nodes: `id(["label"])`.
 - Hierarchy only: `parent --> child`. Each non-root node has exactly one parent;
-  cycles are invalid. Data/reference relationships are reserved and are not
-  inferred from spatial placement.
+  cycles are invalid. Cross-feature relationships use `sm-link` metadata and are
+  never inferred from spatial placement.
 - Category presentation: `classDef name fill:#RRGGBB,stroke:#RRGGBB,color:#RRGGBB,stroke-width:Npx`
   and `class id1,id2 name`.
 - Explicit legend copy: `%% mlc-legend: category|Korean label|description`.
@@ -68,6 +68,10 @@ operation has an honest text round trip.
   five optional features while preserving their data. If the comment is absent,
   readers and writers preserve that absence instead of materializing defaults.
 - The marker `%% mlc-format: 1` is required.
+
+Product metadata (`sm-block`, `sm-turn`, `sm-link`, and `sm-lens`) is documented
+in [the Shape map contract](SHAPE-MAP.md). It lives in this same `.mmd` source;
+Mermaid treats these lines as comments. Parent arrows remain an unambiguous tree.
 
 Label text is JSON-quoted by the writer, so Korean, spaces, and punctuation survive.
 Task, proposal, and workflow comments split at the first delimiter after the node ID, so `|`

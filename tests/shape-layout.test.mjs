@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shapeAncestors, shapeLayout, turnGraph } from '../src/shapeLayout.js';
+import { absoluteShapePosition, shapeAncestors, shapeLayout, turnGraph } from '../src/shapeLayout.js';
 import { blocksForFiles } from '../lib/repository.mjs';
 
 const fixture = () => ({ direction: 'LR', categories: [], nodes: [
@@ -16,9 +16,9 @@ describe('three projections of one product map', () => {
   it('groups by saved parent IDs and preserves deep branches and references in the source', () => {
     const graph = fixture(); const before = structuredClone(graph);
     const system = shapeLayout(graph);
-    expect(system.nodes.filter((node) => node.type === 'shapeGroup').map((node) => node.id)).toEqual(['map', 'discussion']);
+    expect(system.nodes.filter((node) => node.type === 'shapeGroup').map((node) => node.id)).toEqual(['map', 'canvas', 'discussion']);
     expect(system.nodes.find((node) => node.id === 'canvas')).toMatchObject({ parentId: 'map', extent: 'parent' });
-    expect(system.nodes.some((node) => node.id === 'deep')).toBe(false);
+    expect(system.nodes.find((node) => node.id === 'deep').parentId).toBe('canvas');
     expect(shapeLayout(graph, { focusId: 'canvas' }).nodes.map((node) => node.id)).toEqual(['deep']);
     expect(graph).toEqual(before);
   });
@@ -31,12 +31,30 @@ describe('three projections of one product map', () => {
     expect(compact.nodes.find((node) => node.id === 'map').style.width).toBe(340);
     expect(compact.nodes.find((node) => node.id === 'discussion').position.x).toBe(0);
     const tablet = shapeLayout(graph, { singleColumn: true });
-    expect(tablet.nodes.find((node) => node.id === 'map').style.width).toBe(476);
+    expect(tablet.nodes.find((node) => node.id === 'map').style.width).toBe(650);
     expect(tablet.nodes.find((node) => node.id === 'discussion').position.x).toBe(0);
     expect(tablet.nodes.find((node) => node.id === 'discussion').position.y).toBeGreaterThan(200);
     const mobileHierarchy = shapeLayout(graph, { mode: 'function', compact: true });
     expect(mobileHierarchy.nodes.every((node) => node.position.x + node.style.width <= 340)).toBe(true);
     expect(mobileHierarchy.edges.map((edge) => edge.target)).toEqual(['map', 'discussion']);
+  });
+  it('keeps nested cards inside their containers and projects a hidden connection to a folded card', () => {
+    const graph = fixture();
+    graph.links = [{ id: 'input', source: 'note', target: 'deep', kind: 'data', label: '입력' }];
+    const expanded = shapeLayout(graph, { collapsedIds: [], compact: true });
+    for (const node of expanded.nodes.filter((item) => item.parentId)) {
+      const parent = expanded.nodes.find((item) => item.id === node.parentId);
+      expect(node.position.x + node.style.width).toBeLessThanOrEqual(parent.style.width);
+      expect(node.position.y + node.style.height).toBeLessThanOrEqual(parent.style.height);
+    }
+    const deep = expanded.nodes.find((node) => node.id === 'deep');
+    const canvas = expanded.nodes.find((node) => node.id === 'canvas');
+    const map = expanded.nodes.find((node) => node.id === 'map');
+    expect(absoluteShapePosition(expanded.nodes, 'deep')).toEqual({ x: map.position.x + canvas.position.x + deep.position.x, y: map.position.y + canvas.position.y + deep.position.y });
+    const folded = shapeLayout(graph, { collapsedIds: ['canvas'], detailedLinks: true });
+    expect(folded.nodes.some((node) => node.id === 'deep')).toBe(false);
+    expect(folded.edges[0]).toMatchObject({ source: 'note', target: 'canvas' });
+    expect(shapeLayout(graph).edges[0]).toMatchObject({ source: 'discussion', target: 'map' });
   });
   it('matches real changed file paths to explicit feature links and keeps turn snapshots separate', () => {
     expect(blocksForFiles(fixture(), ['src/canvas.jsx', 'lib/save.mjs'])).toEqual([{ id: 'canvas', label: '캔버스' }, { id: 'note', label: '의견' }]);
