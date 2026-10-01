@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMapStore, resolveMapPath } from '../lib/store.mjs';
+import { shapeHistoryEntry, shapeViewHistoryEntry } from '../src/shapeEditing.js';
 
 const demoUrl = new URL('../maps/demo.mmd', import.meta.url);
 const cleanups = [];
@@ -19,6 +20,38 @@ async function fixture(options = {}) {
 afterEach(async () => { while (cleanups.length) await cleanups.pop()(); });
 
 describe('MapStore', () => {
+  it('persists mixed folds, creation, movement, resizing, and deletion in reversible edit order', async () => {
+    const { store, root, mapPath } = await fixture();
+    const clientId = 'mixed-canvas-history';
+    let current = await store.updateView({ baseRevision: store.getSnapshot().revision, clientId,
+      patch: { shape: { layoutVersion: 3, collapsedIds: ['stages'], positions: {}, sizes: {}, viewport: { x: 17, y: 29, zoom: .75 } } } });
+    const source = await fs.readFile(mapPath, 'utf8');
+    const checkpoints = [current]; const entries = [];
+    const apply = async (entry, direction) => {
+      for (const operation of [entry[direction]].filter(Boolean)) current = await store.mutate({ baseRevision: current.revision, clientId, operation });
+      if (entry[`${direction}View`]) current = await store.updateView({ baseRevision: current.revision, clientId, patch: entry[`${direction}View`] });
+    };
+    const record = async (entry) => { await apply(entry, 'redo'); entries.push(entry); checkpoints.push(current); };
+    await record(shapeViewHistoryEntry({ collapsedIds: [] }, { collapsedIds: ['stages'] }, 'stages'));
+    expect(await fs.readFile(mapPath, 'utf8')).toBe(source);
+    await record(shapeHistoryEntry({ type: 'addNode', id: 'history-note', parentId: 'shortform', label: '의견', shape: 'rectangle', category: current.graph.nodes.find(n => n.id === 'shortform').category }, current));
+    await record(shapeViewHistoryEntry({ positions: { 'history-note': { x: 330, y: 200 } } }, { positions: { 'history-note': null } }));
+    await record(shapeViewHistoryEntry({ sizes: { live: { width: 1500, height: 900 } } }, { sizes: { live: null } }));
+    const deletion = shapeHistoryEntry({ type: 'deleteSubtrees', ids: ['history-note'] }, current);
+    deletion.undoView = { shape: { positions: { 'history-note': current.view.shape.positions['history-note'] }, collapsedIds: current.view.shape.collapsedIds } };
+    await record(deletion);
+    for (let i = entries.length - 1; i >= 0; i--) {
+      await apply(entries[i], 'undo');
+      expect(current.graph).toEqual(checkpoints[i].graph); expect(current.view.shape).toEqual(checkpoints[i].view.shape);
+    }
+    for (let i = 0; i < entries.length; i++) {
+      await apply(entries[i], 'redo');
+      expect(current.graph).toEqual(checkpoints[i + 1].graph); expect(current.view.shape).toEqual(checkpoints[i + 1].view.shape);
+    }
+    const reopened = await createMapStore({ projectRoot: root, mapPath: 'maps/demo.mmd', watchFiles: false });
+    expect(reopened.getSnapshot().graph).toEqual(current.graph); expect(reopened.getSnapshot().view.shape).toEqual(current.view.shape);
+    await reopened.close();
+  });
   it('saves section size and nested placement independently, reopens them and supports undo removal', async () => {
     const { root, store, mapPath } = await fixture(); const before = store.getSnapshot(); const source = await fs.readFile(mapPath, 'utf8');
     const updated = await store.updateView({ baseRevision: before.revision, clientId: 'studio', patch: { shape: { layoutVersion: 3, sizes: { planning: { width: 850, height: 480 } }, positions: { planning: { x: 320, y: 100 } } } } });

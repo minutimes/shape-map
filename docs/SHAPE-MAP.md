@@ -169,7 +169,11 @@ Card clicks expand or fold parts on the same canvas; leaf clicks select them.
 The pencil opens attached details. Folding anchors the clicked card on screen
 without changing zoom or fitting the whole diagram. Saved open sizes return on
 expansion. Reparent drops preview the new parent and final pointer position
-together, then install the saved source and view together. Whole-card connection
+together, then install the saved source and view together. Canvas folds, depth
+changes, movement, and resizing share the same undo/redo order as content edits.
+Undoing a fold keeps its card anchored. Creating or pasting into a folded parent
+records its automatic expansion with the content edit. Camera navigation and
+unchanged view choices do not add history entries. Whole-card connection
 targets prefer the deepest visible card; section background targets its section.
 Four exact ports remain available. The target outline and committed connection
 use the same targeting rule. The status text, minimap, and bottom controls each

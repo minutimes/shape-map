@@ -42,7 +42,7 @@ explanation, condition, or relationship. **연결선** controls detail and model
 | Ctrl/⌘ + wheel | Zoom the canvas; plain wheel pans |
 | Ctrl/⌘ + C / V / D | Copy / paste / duplicate selected branches |
 | Delete / Backspace | Delete selected blocks and their contents |
-| Ctrl/⌘ + Z / Shift + Z | Undo / redo local editing |
+| Ctrl/⌘ + Z / Shift + Z | Undo / redo content, folds, depth, movement, size, and section placement |
 | Shift drag or Ctrl/⌘ click | Select multiple blocks |
 | / | Open feature search |
 

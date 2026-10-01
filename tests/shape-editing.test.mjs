@@ -3,7 +3,7 @@ import { parseSource, writeSource } from '../lib/format.mjs';
 import { applyOperation } from '../lib/graph.mjs';
 import { captureTurn } from '../lib/shape.mjs';
 import { shapeLayout, absoluteShapePosition } from '../src/shapeLayout.js';
-import { shapeHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, shapeConnectionTarget, facingShapePort, shapePortPoint, targetShapePort, reparentShapePreview } from '../src/shapeEditing.js';
+import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, shapeConnectionTarget, facingShapePort, shapePortPoint, targetShapePort, reparentShapePreview } from '../src/shapeEditing.js';
 
 const fixture = () => parseSource(`flowchart LR
 %% mlc-format: 1
@@ -22,6 +22,17 @@ class root,a,child,b part
 `);
 
 describe('studio editing contracts', () => {
+  it('ignores unchanged canvas choices and keeps independent fold and placement history snapshots', () => {
+    const before = { collapsedIds: ['a', 'b'], positions: { child: null } };
+    expect(shapeViewHistoryEntry({ collapsedIds: ['b', 'a', 'a'], positions: { child: null }, sizes: { a: null } }, before)).toBeNull();
+    const patch = { collapsedIds: ['b'], positions: { child: { x: 45, y: 180 } } };
+    const entry = shapeViewHistoryEntry(patch, before, 'a');
+    before.collapsedIds.length = 0; patch.positions.child.x = 900;
+    expect(entry.undoView.shape.collapsedIds).toEqual(['a', 'b']);
+    expect(entry.undoView.shape.positions.child).toBeNull();
+    expect(entry.redoView.shape.positions.child).toEqual({ x: 45, y: 180 });
+    expect(entry.anchorId).toBe('a');
+  });
   it('preserves ports, map-defined menu grouping, and proposal goals through source and recorded turns', () => {
     const graph = applyOperation(fixture(), { type: 'setProposal', id: 'a', proposal: { reason: '찾기 어렵다', purpose: '빠르게 찾는다', successCriteria: '장면을 한 번에 찾는다', logic: '장면 구성 표시' } });
     expect(parseSource(writeSource(graph))).toEqual(graph);

@@ -18,7 +18,7 @@ import ShapeConnectionPreview from './ShapeConnectionPreview.jsx';
 import TaskFields from './TaskFields.jsx';
 import { useCenteredZoom } from './useCenteredZoom.js';
 import { readableNodeViewport } from './viewport.js';
-import { shapeHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort, shapeConnectionTarget, targetShapePort, shapePortPoint, reparentShapePreview } from './shapeEditing.js';
+import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort, shapeConnectionTarget, targetShapePort, shapePortPoint, reparentShapePreview } from './shapeEditing.js';
 import './shapeWorkspace.css';
 
 const nodeTypes = { shapeBlock: ShapeBlock, shapeGroup: ShapeGroup };
@@ -402,19 +402,22 @@ export default function ShapeWorkspace() {
     if (busyRef.current) return;
     const visible = flow.getNodes();
     if (visible.some((node) => node.id === id)) foldAnchor.current = { id, position: absoluteShapePosition(visible, id), viewport: flow.getViewport() };
-    const collapsed = new Set(collapsedIds || defaultShapeCollapsed(graph, currentFocus.id));
+    const before = collapsedIds || defaultShapeCollapsed(graph, currentFocus.id);
+    const collapsed = new Set(before);
     collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
-    const next = [...collapsed]; setCollapsedIds(next); persistView({ collapsedIds: next });
+    const next = [...collapsed]; setCollapsedIds(next); commitCanvasView({ collapsedIds: next }, { collapsedIds: before }, id);
   }, [collapsedIds, graph, currentFocus?.id, turnId, flow]);
   const activateNode = useCallback((id) => {
     setSelectedId(null); setSelectionIds([id]);
     if (graph.nodes.some((node) => node.parentId === id)) toggleNode(id);
   }, [graph, toggleNode]);
   function showDepth(levels) {
+    if (busyRef.current) return;
     const depth = shapeAncestors(graph, currentFocus.id).length;
     const parents = new Set(graph.nodes.map((node) => node.parentId));
     const next = graph.nodes.filter((node) => parents.has(node.id) && shapeAncestors(graph, node.id).length >= depth + levels).map((node) => node.id);
-    setCollapsedIds(next); persistView({ collapsedIds: next });
+    const before = collapsedIds || defaultShapeCollapsed(graph, currentFocus.id);
+    setCollapsedIds(next); commitCanvasView({ collapsedIds: next }, { collapsedIds: before });
   }
   const layout = useMemo(() => graph ? shapeLayout(graph, { focusId: currentFocus?.id, mode,
     positions: viewPositions, sizes: viewSizes, states, onOpen: openNode, onActivate: activateNode, onFocus: focusNode, onToggle: toggleNode, onResize: turnId ? undefined : resizeSection, collapsedIds, reading, showActivation, detailedLinks,
@@ -552,11 +555,16 @@ export default function ShapeWorkspace() {
       const parentOrigin = nodes.some((node) => node.id === parent.id) ? absoluteShapePosition(nodes, parent.id) : { x: 0, y: 0 };
       const point = creationPoint && { x: Math.max(12, creationPoint.x - parentOrigin.x), y: Math.max(12, creationPoint.y - parentOrigin.y) };
       createdId = `block-${crypto.randomUUID().slice(0, 8)}`;
+      const beforeFold = collapsedIds || defaultShapeCollapsed(graph, currentFocus.id);
+      const nextFold = beforeFold.filter((id) => id !== parent.id);
       saved = await send({ type: 'addNode', id: createdId, parentId: parent.id,
         shape: 'rectangle', category: parent.category, label: newTitle.trim(),
-        block: { summary: newSummary.trim() }, ...(newSection ? { workflow: { mode: 'group' } } : {}) }, point ? { viewPatch: { shape: { layoutVersion: 3, positions: { [createdId]: point } } }, undoView: { shape: { positions: { [createdId]: null } } } } : {});
+        block: { summary: newSummary.trim() }, ...(newSection ? { workflow: { mode: 'group' } } : {}) }, {
+          viewPatch: { shape: { layoutVersion: 3, collapsedIds: nextFold, ...(point ? { positions: { [createdId]: point } } : {}) } },
+          undoView: { shape: { collapsedIds: beforeFold, ...(point ? { positions: { [createdId]: null } } : {}) } },
+        });
     }
-    if (saved) { setDialog(null); if (dialog === 'block') { const folded = new Set(collapsedIds || defaultShapeCollapsed(saved.graph, currentFocus.id)); folded.delete(newParent); setCollapsedIds([...folded]); openNode(createdId); setRevealId(createdId); } }
+    if (saved) { setDialog(null); if (dialog === 'block') { setCollapsedIds(saved.view.shape?.collapsedIds || null); openNode(createdId); setRevealId(createdId); } }
   }
   function chooseTurn(id) { setTurnId(id); setPlaying(false); setSelectedId(null); setSelectionIds([]); setCollapsedIds(null); }
   async function changeHistory(direction) {
@@ -572,18 +580,28 @@ export default function ShapeWorkspace() {
         try { next = await saveView({ baseRevision: next.revision, clientId: clientId.current, patch: entry[`${direction}View`] }); }
         catch (error) { if (!operations.length) throw error; viewFailed = true; }
       }
+      const fold = entry[`${direction}View`]?.shape?.collapsedIds;
+      if (!viewFailed && fold !== undefined) {
+        const visible = flow.getNodes();
+        if (entry.anchorId && visible.some((node) => node.id === entry.anchorId)) foldAnchor.current = { id: entry.anchorId, position: absoluteShapePosition(visible, entry.anchorId), viewport: flow.getViewport() };
+        setCollapsedIds(next.view.shape.collapsedIds);
+      }
       accept(next);
-      if (entry[`${direction}View`]?.shape?.collapsedIds) setCollapsedIds(entry[`${direction}View`].shape.collapsedIds);
       direction === 'undo' ? historyStacks(undoRef.current.slice(0, -1), [...redoRef.current, entry]) : historyStacks([...undoRef.current, entry], redoRef.current.slice(0, -1));
       setToast(viewFailed ? { error: true, text: '내용은 되돌렸지만 위치는 저장하지 못했습니다.' } : { text: direction === 'undo' ? '실행을 취소했습니다.' : '다시 실행했습니다.' });
     } catch (error) { if (error.body?.snapshot) accept(error.body.snapshot); setToast({ error: true, text: '다른 변경이 있어 되돌리지 못했습니다. 현재 지도를 확인해 주세요.' }); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  async function commitCanvasView(patch, before) {
-    if (busyRef.current || turnId) return;
+  async function commitCanvasView(patch, before, anchorId = null) {
+    if (busyRef.current || turnId || !snapshotRef.current?.sourceStatus.valid) return;
+    const entry = shapeViewHistoryEntry(patch, before, anchorId); if (!entry) return;
     busyRef.current = true; setBusy(true);
-    try { const next = await saveView({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, patch: { shape: { layoutVersion: 3, ...patch } } }); accept(next); historyStacks([...undoRef.current, { label: 'canvas', undoView: { shape: before }, redoView: { shape: { layoutVersion: 3, ...patch } } }].slice(-100), []); }
-    catch (error) { if (error.body?.snapshot) accept(error.body.snapshot); setToast({ error: true, text: '위치를 저장하지 못했습니다.' }); setNodes(layout.nodes); }
+    try { const next = await saveView({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, patch: entry.redoView }); accept(next); historyStacks([...undoRef.current, entry].slice(-100), []); }
+    catch (error) {
+      if (error.body?.snapshot) accept(error.body.snapshot);
+      if (patch.collapsedIds !== undefined) setCollapsedIds(error.body?.snapshot?.view?.shape?.collapsedIds || before.collapsedIds);
+      setToast({ error: true, text: '지도 편집을 저장하지 못했습니다.' }); if (patch.collapsedIds === undefined) setNodes(layout.nodes);
+    }
     finally { busyRef.current = false; setBusy(false); }
   }
   async function copySelected(ids = selectionIds) {
@@ -601,8 +619,11 @@ export default function ShapeWorkspace() {
     const operation = pasteBranch(snapshotRef.current.graph, content, parent); if (!operation) { setToast({ text: '복사한 기능 블록이 없습니다.' }); return; }
     const createdRoots = operation.nodes.filter((node) => node.parentId === parent);
     const positions = point ? Object.fromEntries(createdRoots.map((node, i) => [node.id, { x: point.x + i * 24, y: point.y + i * 24 }])) : {};
-    if (await send(operation, Object.keys(positions).length ? { viewPatch: { shape: { positions, layoutVersion: 3 } }, undoView: { shape: { positions: Object.fromEntries(createdRoots.map((node) => [node.id, null])) } } } : {})) {
-      const folded = new Set(collapsedIds || defaultShapeCollapsed(graph, currentFocus.id)); folded.delete(parent); setCollapsedIds([...folded]); setSelectedId(null); setSelectionIds(createdRoots.map((node) => node.id));
+    const beforeFold = collapsedIds || defaultShapeCollapsed(graph, currentFocus.id);
+    const saved = await send(operation, { viewPatch: { shape: { positions, layoutVersion: 3, collapsedIds: beforeFold.filter((id) => id !== parent) } },
+      undoView: { shape: { collapsedIds: beforeFold, positions: Object.fromEntries(createdRoots.map((node) => [node.id, null])) } } });
+    if (saved) {
+      setCollapsedIds(saved.view.shape?.collapsedIds || null); setSelectedId(null); setSelectionIds(createdRoots.map((node) => node.id));
     }
   }
   async function duplicateSelected(ids = selectionIds) {

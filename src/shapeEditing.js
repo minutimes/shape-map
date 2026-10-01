@@ -1,8 +1,21 @@
-import { historyEntryForOperation, deletionHistoryEntry } from './history.js';
+import { historyEntryForOperation, deletionHistoryEntry, viewHistoryEntry } from './history.js';
 import { absoluteShapePosition } from './shapeLayout.js';
 
 const clone = (value) => structuredClone(value);
 const fresh = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll('-', '_')}`;
+
+/** Canvas edits share the semantic edit history; camera navigation stays separate. */
+export function shapeViewHistoryEntry(patch, before, anchorId = null) {
+  const changed = Object.keys(patch).some((field) => {
+    if (field === 'layoutVersion') return false;
+    if (field === 'collapsedIds') return JSON.stringify([...new Set(patch[field])].sort()) !== JSON.stringify([...new Set(before[field] || [])].sort());
+    if (field === 'positions' || field === 'sizes') return Object.entries(patch[field]).some(([id, value]) => JSON.stringify(value ?? null) !== JSON.stringify(before[field]?.[id] ?? null));
+    return JSON.stringify(patch[field]) !== JSON.stringify(before[field]);
+  });
+  if (!changed) return null;
+  return { ...viewHistoryEntry('canvas', { shape: { layoutVersion: 3, ...before } }, { shape: { layoutVersion: 3, ...patch } }),
+    ...(anchorId ? { anchorId } : {}) };
+}
 
 export function shapeHistoryEntry(operation, snapshot) {
   const op = clone(operation); delete op.expectedFingerprint;
