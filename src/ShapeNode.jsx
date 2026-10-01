@@ -1,5 +1,5 @@
 import { memo, useCallback, useRef } from 'react';
-import { Handle, Position, NodeResizer } from '@xyflow/react';
+import { Handle, Position, NodeResizer, useViewport } from '@xyflow/react';
 
 export function ShapeIcon({ name, size = 18, ...props }) {
   const paths = {
@@ -30,6 +30,7 @@ export function ShapeIcon({ name, size = 18, ...props }) {
     undo: <path d="M9 5 4 10l5 5m-5-5h10a6 6 0 0 1 0 12" />,
     redo: <path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12" />,
     trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
+    pencil: <><path d="m15 4 5 5M4 20l5-1L21 7a2.8 2.8 0 0 0-4-4L5 15l-1 5Z" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name] || paths.box}</svg>;
 }
@@ -49,14 +50,19 @@ export function StateBadge({ status = 'neutral', compact = false }) {
 
 const executorLabel = { code: '코드', perception: '음성·문자 인식', llm: '추론·생성 모델', jev: '구조화 판단 모델', human: '사람' };
 function Ports({ vertical = false }) {
-  return <><Handle id="in" type="source" position={Position.Left} className="sm-handle" />
+  const { zoom } = useViewport();
+  return <div style={{ '--sm-port-hit': `${Math.min(48, 24 / zoom)}px`, '--sm-port-dot': `${Math.min(12, 7 / zoom)}px` }}><Handle id="in" type="source" position={Position.Left} className="sm-handle" />
     <Handle id="out" type="source" position={vertical ? Position.Left : Position.Right} className="sm-handle" />
     <Handle id="top" type="source" position={Position.Top} className="sm-handle" />
     <Handle id="bottom" type="source" position={Position.Bottom} className="sm-handle" />
     <Handle id="left-source" type="source" position={Position.Left} className="sm-handle sm-handle-alias" isConnectable={false} />
     <Handle id="right-target" type="target" position={Position.Right} className="sm-handle sm-handle-alias" isConnectable={false} />
     <Handle id="top-source" type="source" position={Position.Top} className="sm-handle sm-handle-alias" isConnectable={false} />
-    <Handle id="bottom-target" type="target" position={Position.Bottom} className="sm-handle sm-handle-alias" isConnectable={false} /></>;
+    <Handle id="bottom-target" type="target" position={Position.Bottom} className="sm-handle sm-handle-alias" isConnectable={false} /></div>;
+}
+
+function EditButton({ data }) {
+  return <button className="sm-icon-button sm-node-edit nodrag nopan" aria-label={`${data.node.label} 상세 수정`} title="설명·메모·수정안" onClick={(event) => { event.stopPropagation(); data.onOpen(data.node.id); }}><ShapeIcon name="pencil" size={14} /></button>;
 }
 
 function FeatureHints({ node, reading }) {
@@ -73,8 +79,9 @@ export const ShapeBlock = memo(function ShapeBlock({ data, selected }) {
     <div className="sm-block__top"><StateBadge status={state.status} compact />
       {state.commentCount > 0 && <span className="sm-block__comments" aria-label={`의견 ${state.commentCount}개`}><ShapeIcon name="comment" size={12} />{state.commentCount}</span>}
       <FeatureHints node={node} reading={data.reading} />
+      <span className="sm-node-actions"><EditButton data={data} /></span>
     </div>
-    <button className="sm-block__title" aria-label={node.label} title={node.label} onClick={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) return; event.stopPropagation(); data.onOpen(node.id); }}>{data.title || node.label}</button>
+    <button className="sm-block__title" aria-label={node.label} title={node.label} aria-expanded={childCount ? !data.collapsed : undefined} onClick={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) return; event.stopPropagation(); data.onActivate(node.id); }}>{data.title || node.label}</button>
     {description && !data.architecture && <p className="sm-block__description">{description}</p>}
     {childCount > 0 && <button className="sm-block__deeper nodrag" aria-label={`${node.label} 내부 ${childCount}개 보기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><span>내부 {childCount}개</span><ShapeIcon name="chevron" size={11} /></button>}
   </div>;
@@ -91,10 +98,11 @@ export const ShapeGroup = memo(function ShapeGroup({ data, selected }) {
     {data.onResize && <NodeResizer isVisible={selected} minWidth={data.minimumWidth || 340} minHeight={data.minimumHeight || 100} onResizeStart={startResize} onResizeEnd={finishResize} />}
     <Ports />
     <div className="sm-group__header"><span className="sm-group__index">{data.depth ? `내부 ${childCount}개` : String(index).padStart(2, '0')}</span><StateBadge status={state.status} compact />{data.collapsed && !data.depth && <span className="sm-group__part-count">세부 영역 {childCount}개</span>}<FeatureHints node={node} reading={data.reading} />
-      {childCount > 0 && <button className="sm-icon-button sm-group__fold nodrag" aria-label={`${node.label} ${data.collapsed ? '내부 펼치기' : '내부 접기'}`} aria-expanded={!data.collapsed} onClick={(event) => { event.stopPropagation(); data.onToggle(node.id); }}><ShapeIcon name={data.collapsed ? 'plus' : 'minus'} size={14} /></button>}
+      <span className="sm-node-actions"><EditButton data={data} />{childCount > 0 && <button className="sm-icon-button sm-group__fold nodrag" aria-label={`${node.label} ${data.collapsed ? '내부 펼치기' : '내부 접기'}`} aria-expanded={!data.collapsed} onClick={(event) => { event.stopPropagation(); data.onToggle(node.id); }}><ShapeIcon name={data.collapsed ? 'plus' : 'minus'} size={14} /></button>}
       <button className="sm-icon-button sm-group__focus nodrag" aria-label={`${node.label} 안으로 들어가기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><ShapeIcon name="expand" size={14} /></button>
-    </div><button className="sm-group__title" aria-label={node.label} title={node.label} onClick={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) return; event.stopPropagation(); data.onOpen(node.id); }}>{data.title || node.label}</button>
+      </span>
+    </div><button className="sm-group__title" aria-label={node.label} title={node.label} aria-expanded={childCount ? !data.collapsed : undefined} onClick={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) return; event.stopPropagation(); data.onActivate(node.id); }}>{data.title || node.label}</button>
     {data.showDescription && (node.block?.summary || node.task?.logic) ? <p className="sm-group__description">{node.block?.summary || node.task.logic}</p> : null}
-    {!childCount && <p className="sm-group__empty">이 기능을 눌러 설명과 의견을 남겨 보세요.</p>}
+    {!childCount && <p className="sm-group__empty">연필을 눌러 설명과 의견을 남겨 보세요.</p>}
   </div>;
 });

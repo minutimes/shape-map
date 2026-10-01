@@ -98,3 +98,53 @@ export function settleShapePosition(nodes, id, position, parentId) {
   }
   return result;
 }
+
+/** Whole-card connection targets. The deepest visible card wins inside a section. */
+export function shapeConnectionTarget(nodes, sourceId, point, tolerance = 0) {
+  const candidates = nodes.filter((node) => node.id !== sourceId).map((node) => {
+    const position = absoluteShapePosition(nodes, node.id);
+    const rect = { ...position, width: node.style.width, height: node.style.height };
+    const dx = Math.max(rect.x - point.x, 0, point.x - rect.x - rect.width);
+    const dy = Math.max(rect.y - point.y, 0, point.y - rect.y - rect.height);
+    return { node, rect, distance: Math.hypot(dx, dy), area: rect.width * rect.height };
+  }).filter((item) => item.distance <= tolerance);
+  const inside = candidates.filter((item) => item.distance === 0);
+  const target = (inside.length ? inside : candidates).sort((a, b) => a.area - b.area || a.distance - b.distance)[0] || null;
+  const source = nodes.find((node) => node.id === sourceId);
+  if (source && target) {
+    const origin = absoluteShapePosition(nodes, sourceId);
+    if (point.x >= origin.x && point.x <= origin.x + source.style.width && point.y >= origin.y && point.y <= origin.y + source.style.height) {
+      let parent = target.node.parentId;
+      while (parent && parent !== sourceId) parent = nodes.find((node) => node.id === parent)?.parentId;
+      if (parent !== sourceId) return null;
+    }
+  }
+  return target;
+}
+
+/** Choose the side facing the source when the user drops anywhere on a card. */
+export function facingShapePort(rect, source) {
+  const dx = (source.x - rect.x - rect.width / 2) / Math.max(1, rect.width);
+  const dy = (source.y - rect.y - rect.height / 2) / Math.max(1, rect.height);
+  return Math.abs(dx) >= Math.abs(dy) ? dx < 0 ? 'left' : 'right' : dy < 0 ? 'top' : 'bottom';
+}
+
+export function shapePortPoint(rect, port) {
+  return { x: rect.x + (port === 'left' ? 0 : port === 'right' ? rect.width : rect.width / 2),
+    y: rect.y + (port === 'top' ? 0 : port === 'bottom' ? rect.height : rect.height / 2) };
+}
+
+export function targetShapePort(rect, source, pointer, explicitPort, precisionRadius = 14) {
+  const point = explicitPort && shapePortPoint(rect, explicitPort);
+  return point && Math.hypot(point.x - pointer.x, point.y - pointer.y) <= precisionRadius
+    ? explicitPort : facingShapePort(rect, source);
+}
+
+/** Preview a reparent at the drop position, without repacking the entire map. */
+export function reparentShapePreview(graph, nodes, id, parentId, position, collapsedIds) {
+  return {
+    graph: { ...graph, nodes: graph.nodes.map((node) => node.id === id ? { ...node, parentId } : node) },
+    positions: { ...Object.fromEntries(nodes.map((node) => [node.id, { ...node.position }])), [id]: position },
+    collapsedIds: collapsedIds.filter((item) => item !== parentId),
+  };
+}

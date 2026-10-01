@@ -13,21 +13,28 @@ improve next. The interface is Korean-first.
 
 Function hierarchy, system composition, and product shape are read together.
 The left **레이어** panel mirrors the actual feature tree: fold a branch, find a
-feature by name or ID, and select it to open its attached detail card. Hide the
+feature by name or ID, and select it to locate it on the canvas. Hide the
 panel to use the full canvas. Top-level section titles stay readable when zoomed
 out. The toolbar is compact; recorded turns open only when requested. Narrow
 windows adapt the controls while retaining the same canvas arrangement and positions.
 
-Cards can contain more cards at any depth. Click a card to read its role, notes,
-proposal, attributes, connections, and recorded changes. Its stable ID has a copy
+Cards can contain more cards at any depth. Click a card to expand or fold its
+contents in place. The clicked card stays at the same screen position and zoom.
+Use its pencil to read and edit its role, notes, proposal, attributes, connections,
+and recorded changes. A leaf click selects it. Its stable ID has a copy
 button. **구성·변경 설명** provides a plain-language explanation of the current
 scope. Connected source files lead to actual Git changes.
 
 Right-click blank space to create a block or section, or use the bottom tools.
 Right-click a block to rename, change attributes, copy, duplicate, or delete it.
-Drag a block into a section to change its saved parent. Selected sections have
+Drag a block into a section to change its saved parent in place. The drop previews
+the new parent and position together while saving; it does not refit the camera.
+Selected sections have
 resize handles. Drops clear sibling cards; containers grow to hold their contents.
-Pull a connection from any of four sides; click its line or label to edit the
+Pull a connection from any of four sides and drop anywhere on a target card.
+The deepest visible card under the pointer takes priority; section background
+connects to the section. A highlighted outline previews the target. Exact ports
+still work when a particular side matters. Click the line or label to edit the
 explanation, condition, or relationship. **연결선** controls detail and model links.
 
 | Shortcut | Action |

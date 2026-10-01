@@ -32,10 +32,13 @@ export function measureShapeCard(node, children, collapsed, depth = 0, compact =
   const group = all.length > 0 || Boolean(node.workflow);
   if (!items.length) {
     const emptySection = group && !all.length;
-    const width = Math.max(depth ? tileWidth : 340, emptySection ? 480 : 0, custom.sizes?.[node.id]?.width || 0);
+    // A folded section is a compact card. Its authored open size remains saved
+    // and is restored on expansion instead of leaving a large empty rectangle.
+    const requested = all.length && collapsed.has(node.id) ? {} : custom.sizes?.[node.id];
+    const width = Math.max(depth ? tileWidth : 340, emptySection ? 480 : 0, requested?.width || 0);
     const titleHeight = Math.min(depth ? 2 : Infinity, titleLines(shapeCardTitle(node, depth), width - 28, depth ? 14 : 18)) * (depth ? 20 : 24);
     const header = (depth ? 32 : 44) + titleHeight;
-    return { width, height: Math.max(header + 6, emptySection ? 240 : 0, custom.sizes?.[node.id]?.height || 0), minimumWidth: Math.max(depth ? tileWidth : 340, emptySection ? 480 : 0), minimumHeight: Math.max(header + 6, emptySection ? 240 : 0), header, group, items: [], sizes: [], slots: [] };
+    return { width, height: Math.max(header + 6, emptySection ? 240 : 0, requested?.height || 0), minimumWidth: Math.max(depth ? tileWidth : 340, emptySection ? 480 : 0), minimumHeight: Math.max(header + 6, emptySection ? 240 : 0), header, group, items: [], sizes: [], slots: [] };
   }
   const sizes = items.map((child) => measureShapeCard(child, children, collapsed, depth + 1, compact, custom));
   const widest = Math.max(...sizes.map((size) => size.width));

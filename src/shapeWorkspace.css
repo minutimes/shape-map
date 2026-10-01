@@ -18,9 +18,9 @@
 .sm-project-name svg { flex: 0 0 auto; color: #9c9ca4; }
 .sm-topbar__actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .sm-save-state { display: inline-flex; align-items: center; gap: 6px; color: var(--sm-muted); font-size: 11px; margin-right: 10px; white-space: nowrap; }
-.sm-save-state > span { width: 5px; height: 5px; border-radius: 50%; background: #9a9aa2; }
+.sm-save-state > span:first-child { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: #9a9aa2; }
 .sm-save-state.is-offline { color: #947124; }
-.sm-save-state.is-offline > span { background: #b88831; }
+.sm-save-state.is-offline > span:first-child { background: #b88831; }
 .sm-button { min-height: 35px; padding: 0 12px; border: 1px solid #dedee3; border-radius: 7px; background: #fff; display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; font-weight: 550; line-height: 1.3; text-decoration: none; white-space: nowrap; color: var(--sm-ink); }
 .sm-button:hover { background: #f5f5f7; border-color: #c7c7ce; }
 .sm-button--dark { background: #2a2a2f; border-color: #2a2a2f; color: #fff; }
@@ -542,7 +542,8 @@
 .sm-studio .sm-timeline-slider { margin-top: 5px; }
 .sm-studio .sm-replay-badge { top: 52px; bottom: auto; left: 15px; font-size: 10px; }
 .sm-studio .sm-error-banner { position: absolute; top: 48px; left: 0; right: 0; z-index: 170; }
-.sm-studio .sm-handle { width: 9px !important; height: 9px !important; background: #fff !important; border: 1.5px solid #85858e !important; opacity: 0; pointer-events: all !important; transition: opacity .12s; }
+.sm-studio .sm-handle { width: var(--sm-port-hit, 24px) !important; height: var(--sm-port-hit, 24px) !important; background: transparent !important; border: 0 !important; opacity: 0; pointer-events: all !important; transition: opacity .12s; z-index: 50; }
+.sm-studio .sm-handle::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: var(--sm-port-dot, 7px); height: var(--sm-port-dot, 7px); background: #fff; border: 1.5px solid #85858e; border-radius: 50%; }
 .sm-studio .react-flow__node:hover .sm-handle, .sm-studio .react-flow__node.selected .sm-handle, .sm-studio .react-flow__handle.connecting { opacity: 1; }
 .sm-studio .sm-handle-alias { opacity: 0 !important; pointer-events: none !important; }
 .sm-studio .react-flow__resize-control { background: #fff; border-color: #6c6c78; }
@@ -627,3 +628,21 @@
 }
 
 .sm-studio .sm-connection-label { pointer-events: all; cursor: pointer; }
+
+/* Keep related tools in one row and reserve a separate lane for the minimap. */
+.sm-bottom-tools { position: absolute; bottom: 14px; left: 14px; right: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; pointer-events: none; z-index: 110; }
+.sm-studio .sm-bottom-tools .sm-creation-dock, .sm-studio .sm-bottom-tools .sm-canvas-bottom { position: static; inset: auto; transform: none; pointer-events: auto; }
+.sm-studio .react-flow__minimap { bottom: 76px; right: 14px; margin: 0; z-index: 80; }
+.sm-node-actions { display: inline-flex; gap: 1px; margin-left: auto; flex-shrink: 0; align-items: center; }
+.sm-studio .sm-node-actions .sm-icon-button { width: 22px; min-width: 22px; height: 22px; }
+.sm-studio .sm-group__header { gap: 6px; }
+.sm-layer-edit { width: 22px; min-width: 22px; height: 24px; opacity: 0; }
+.sm-layer-row:hover .sm-layer-edit, .sm-layer-row.is-selected .sm-layer-edit, .sm-layer-edit:focus-visible { opacity: 1; }
+.sm-connection-preview { pointer-events: none; }
+.sm-connection-preview rect { fill: #5555600c; stroke: #626270; stroke-width: 1.5; stroke-dasharray: 4 3; }
+.sm-connection-preview path { fill: none; stroke: #626270; stroke-width: 1.5; }
+.sm-connection-preview circle { fill: #626270; }
+@media (max-width: 540px) {
+  .sm-bottom-tools { left: 9px; right: 9px; gap: 6px; }
+  .sm-studio .react-flow__minimap { bottom: 67px; right: 9px; }
+}

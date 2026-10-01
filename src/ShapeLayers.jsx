@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { ShapeIcon } from './ShapeNode.jsx';
 
-export default function ShapeLayers({ graph, rootId, states, collapsedIds, selectedIds, onToggle, onSelect, onFocus, onMenu, search }) {
+export default function ShapeLayers({ graph, rootId, states, collapsedIds, selectedIds, onToggle, onSelect, onEdit, onFocus, onMenu, search }) {
   const children = useMemo(() => {
     const result = new Map(graph.nodes.map((node) => [node.id, []]));
     graph.nodes.forEach((node) => { if (node.section !== 'reference') result.get(node.parentId)?.push(node); }); return result;
@@ -18,6 +18,7 @@ export default function ShapeLayers({ graph, rootId, states, collapsedIds, selec
       <div className={`sm-layer-row${selectedIds.includes(node.id) ? ' is-selected' : ''}`} style={{ '--layer-depth': depth }} onContextMenu={(event) => onMenu(event, node.id)}>
         <button className="sm-layer-fold" aria-label={`${node.label} ${open ? '레이어 접기' : '레이어 펼치기'}`} disabled={!parts.length} onClick={() => onToggle(node.id)}><ShapeIcon name={open ? 'minus' : 'chevron'} size={11} /></button>
         <button className="sm-layer-name" title={`${node.label} · ${node.id}`} onClick={() => onSelect(node.id)} onDoubleClick={() => onFocus(node.id)}><ShapeIcon name={parts.length || node.workflow ? 'grid' : 'box'} size={13} /><span>{node.label}</span><i className={`sm-outline-dot sm-outline-dot--${states[node.id]?.status}`} />{parts.length > 0 && <small>{parts.length}</small>}</button>
+        <button className="sm-icon-button sm-layer-edit" aria-label={`${node.label} 상세 수정`} onClick={() => onEdit(node.id)}><ShapeIcon name="pencil" size={12} /></button>
       </div>
       {parts.length > 0 && open && <ul role="group">{parts.map((child) => render(child, depth + 1))}</ul>}
     </li>;

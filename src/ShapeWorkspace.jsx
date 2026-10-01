@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Background, BackgroundVariant, ConnectionMode, MiniMap, ReactFlow, applyNodeChanges, getViewportForBounds, useReactFlow, useViewport } from '@xyflow/react';
 import { mutateMap, readMap, saveView } from './api.js';
 import { compareTurnGraphs, getBlockState, nodeFingerprint } from '../lib/shape.mjs';
@@ -14,10 +14,11 @@ import { areaReading, featureHistory } from './systemReading.js';
 import ShapeLayers from './ShapeLayers.jsx';
 import ShapeSectionTitles from './ShapeSectionTitles.jsx';
 import ShapeContextMenu from './ShapeContextMenu.jsx';
+import ShapeConnectionPreview from './ShapeConnectionPreview.jsx';
 import TaskFields from './TaskFields.jsx';
 import { useCenteredZoom } from './useCenteredZoom.js';
 import { readableNodeViewport } from './viewport.js';
-import { shapeHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort } from './shapeEditing.js';
+import { shapeHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort, shapeConnectionTarget, targetShapePort, shapePortPoint, reparentShapePreview } from './shapeEditing.js';
 import './shapeWorkspace.css';
 
 const nodeTypes = { shapeBlock: ShapeBlock, shapeGroup: ShapeGroup };
@@ -269,6 +270,7 @@ export default function ShapeWorkspace() {
   const [newParent, setNewParent] = useState('');
   const [minimap, setMinimap] = useState(false);
   const [nodes, setNodes] = useState([]);
+  const [optimisticGraph, setOptimisticGraph] = useState(null);
   const [viewPositions, setViewPositions] = useState({});
   const [collapsedIds, setCollapsedIds] = useState(null);
   const [lensSelections, setLensSelections] = useState({});
@@ -281,6 +283,9 @@ export default function ShapeWorkspace() {
   const canvasRef = useRef(null);
   const searchRef = useRef(null);
   const restoredMap = useRef(null);
+  const foldAnchor = useRef(null);
+  const completedConnection = useRef(null);
+  const pointerGrab = useRef(null);
   const flow = useReactFlow();
   const accept = useCallback((next) => {
     const previous = snapshotRef.current;
@@ -288,11 +293,14 @@ export default function ShapeWorkspace() {
     if (previous && next.revision !== previous.revision && next.origin !== clientId.current) {
       undoRef.current = []; redoRef.current = []; setUndoStack([]); setRedoStack([]);
     }
-    snapshotRef.current = next; setSnapshot(next);
+    const installed = previous?.revision === next.revision ? { ...next, graph: previous.graph } : next;
+    snapshotRef.current = installed; setSnapshot(installed);
     setSelectedId((id) => next.graph.nodes.some((node) => node.id === id) ? id : null);
     setSelectionIds((ids) => ids.filter((id) => next.graph.nodes.some((node) => node.id === id)));
     if (next.view?.shape?.layoutVersion === 3) {
-      setViewPositions(next.view.shape.positions || {}); setViewSizes(next.view.shape.sizes || {});
+      const positions = next.view.shape.positions || {}; const sizes = next.view.shape.sizes || {};
+      setViewPositions((current) => JSON.stringify(current) === JSON.stringify(positions) ? current : positions);
+      setViewSizes((current) => JSON.stringify(current) === JSON.stringify(sizes) ? current : sizes);
     }
   }, []);
   const centeredZoom = useCenteredZoom({ canvasRef, minZoom: .06, maxZoom: 2, enabled: Boolean(snapshot) });
@@ -306,7 +314,13 @@ export default function ShapeWorkspace() {
     let disposed = false;
     readMap().then((next) => { if (!disposed) { accept(next); setConnection('online'); } }).catch(() => { if (!disposed) setConnection('offline'); });
     const events = new EventSource('/api/events');
-    events.addEventListener('snapshot', (event) => { if (!disposed) { accept(JSON.parse(event.data)); setConnection('online'); } });
+    events.addEventListener('snapshot', (event) => { if (!disposed) {
+      const next = JSON.parse(event.data);
+      // Install our final response once. The semantic write and its view save
+      // must not briefly render two different parents/positions during a drop.
+      if (!(busyRef.current && next.origin === clientId.current)) accept(next);
+      setConnection('online');
+    } });
     events.addEventListener('source-error', (event) => { if (!disposed) { const error = JSON.parse(event.data); if (error.snapshot) accept(error.snapshot); } });
     events.onopen = () => { if (!disposed) setConnection('online'); };
     events.onerror = () => { if (!disposed) setConnection('offline'); };
@@ -325,11 +339,11 @@ export default function ShapeWorkspace() {
     try {
       let viewFailed = false;
       let next = await mutateMap({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, operation });
-      accept(next);
       if (options.viewPatch) {
-        try { next = await saveView({ baseRevision: next.revision, clientId: clientId.current, patch: options.viewPatch }); accept(next); }
+        try { next = await saveView({ baseRevision: next.revision, clientId: clientId.current, patch: options.viewPatch }); }
         catch { viewFailed = true; }
       }
+      accept(next);
       if (entry && next.revision !== before.revision) {
         if (options.undoView) entry.undoView = options.undoView;
         if (options.viewPatch) entry.redoView = options.viewPatch;
@@ -350,7 +364,7 @@ export default function ShapeWorkspace() {
   }
   const turns = snapshot?.graph.turns || EMPTY_TURNS;
   const selectedTurn = turns.find((turn) => turn.id === turnId);
-  const graph = useMemo(() => selectedTurn ? turnGraph(selectedTurn) : snapshot?.graph, [selectedTurn, snapshot?.graph]);
+  const graph = useMemo(() => selectedTurn ? turnGraph(selectedTurn) : optimisticGraph || snapshot?.graph, [selectedTurn, optimisticGraph, snapshot?.graph]);
   const root = graph?.nodes.find((node) => !node.parentId);
   const selected = graph?.nodes.find((node) => node.id === selectedId);
   const index = turnId ? turns.findIndex((turn) => turn.id === turnId) : turns.length;
@@ -385,10 +399,17 @@ export default function ShapeWorkspace() {
     window.history.replaceState(null, '', url);
   }, []);
   const toggleNode = useCallback((id) => {
+    if (busyRef.current) return;
+    const visible = flow.getNodes();
+    if (visible.some((node) => node.id === id)) foldAnchor.current = { id, position: absoluteShapePosition(visible, id), viewport: flow.getViewport() };
     const collapsed = new Set(collapsedIds || defaultShapeCollapsed(graph, currentFocus.id));
     collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
     const next = [...collapsed]; setCollapsedIds(next); persistView({ collapsedIds: next });
-  }, [collapsedIds, graph, currentFocus?.id, turnId]);
+  }, [collapsedIds, graph, currentFocus?.id, turnId, flow]);
+  const activateNode = useCallback((id) => {
+    setSelectedId(null); setSelectionIds([id]);
+    if (graph.nodes.some((node) => node.parentId === id)) toggleNode(id);
+  }, [graph, toggleNode]);
   function showDepth(levels) {
     const depth = shapeAncestors(graph, currentFocus.id).length;
     const parents = new Set(graph.nodes.map((node) => node.parentId));
@@ -396,11 +417,19 @@ export default function ShapeWorkspace() {
     setCollapsedIds(next); persistView({ collapsedIds: next });
   }
   const layout = useMemo(() => graph ? shapeLayout(graph, { focusId: currentFocus?.id, mode,
-    positions: viewPositions, sizes: viewSizes, states, onOpen: openNode, onFocus: focusNode, onToggle: toggleNode, onResize: turnId ? undefined : resizeSection, collapsedIds, reading, showActivation, detailedLinks,
+    positions: viewPositions, sizes: viewSizes, states, onOpen: openNode, onActivate: activateNode, onFocus: focusNode, onToggle: toggleNode, onResize: turnId ? undefined : resizeSection, collapsedIds, reading, showActivation, detailedLinks,
     compact: false }) : { nodes: [], edges: [] },
-  [graph, currentFocus?.id, mode, viewPositions, viewSizes, states, openNode, focusNode, toggleNode, collapsedIds, reading, showActivation, detailedLinks, turnId]);
-  useEffect(() => setNodes(layout.nodes.map((node) => ({ ...node, selected: selectionIds.includes(node.id),
+  [graph, currentFocus?.id, mode, viewPositions, viewSizes, states, openNode, activateNode, focusNode, toggleNode, collapsedIds, reading, showActivation, detailedLinks, turnId]);
+  useLayoutEffect(() => setNodes(layout.nodes.map((node) => ({ ...node, selected: selectionIds.includes(node.id),
     className: (filter && node.data.state.status !== filter) || reading[node.id]?.active === false ? 'sm-node-muted' : '' }))), [layout, filter, reading]);
+  useLayoutEffect(() => {
+    const anchor = foldAnchor.current;
+    if (!anchor || !layout.nodes.some((node) => node.id === anchor.id)) return;
+    const position = absoluteShapePosition(layout.nodes, anchor.id);
+    const { viewport } = anchor; foldAnchor.current = null;
+    flow.setViewport({ ...viewport, x: viewport.x + (anchor.position.x - position.x) * viewport.zoom,
+      y: viewport.y + (anchor.position.y - position.y) * viewport.zoom }, { duration: 0 });
+  }, [layout, flow]);
   useEffect(() => setNodes((current) => current.every((node) => node.selected === selectionIds.includes(node.id)) ? current : current.map((node) => ({ ...node, selected: selectionIds.includes(node.id) }))), [selectionIds]);
   const displayNodes = useMemo(() => nodes.map((node) => ({ ...node, draggable: !turnId, className: `${node.className || ''}${node.id === dropId ? ' sm-drop-target' : ''}` })), [nodes, turnId, dropId]);
   const changeNodes = useCallback((changes) => {
@@ -420,7 +449,9 @@ export default function ShapeWorkspace() {
     if (bounds && canvas) flow.setViewport(getViewportForBounds(bounds, canvas.clientWidth, canvas.clientHeight, .06, 1.15,
       { left: '4%', right: '4%', top: '80px', bottom: '70px' }));
   }, [flow]);
-  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${detailedLinks}:${showActivation}:${windowWidth}:${windowHeight}:${expandedCanvas}:${collapsedIds?.join(',') || 'default'}`;
+  // Only deliberate navigation or canvas resizing changes the camera. Folding,
+  // connections, source updates and reparenting keep the current reading position.
+  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${windowWidth}:${windowHeight}:${expandedCanvas}`;
   useEffect(() => {
     if (!snapshot || restoredMap.current === snapshot.mapPath) return;
     restoredMap.current = snapshot.mapPath;
@@ -596,11 +627,16 @@ export default function ShapeWorkspace() {
     if (!nodes.some((item) => item.id === id)) focusNode(node.parentId || node.id);
     openNode(id); setRevealId(id);
   }
+  function selectLayer(id) {
+    const node = graph.nodes.find((item) => item.id === id); if (!node) return;
+    if (!nodes.some((item) => item.id === id)) focusNode(node.parentId || node.id);
+    setSelectedId(null); setSelectionIds([id]); setRevealId(id);
+  }
   useEffect(() => {
     if (!revealId) return; const node = nodes.find((item) => item.id === revealId); if (!node) return;
     flow.setViewport(readableNodeViewport({ ...node, positionAbsolute: absoluteShapePosition(nodes, node.id) }, canvasRef.current?.getBoundingClientRect(), { zoom: .85 })); setRevealId(null);
   }, [nodes, revealId, flow]);
-  function editNode(id, tab = 'overview') { showNode(id); setInspectorIntent({ id, tab, edit: tab === 'overview', key: crypto.randomUUID() }); }
+  function editNode(id, tab = 'overview') { nodes.some((node) => node.id === id) ? openNode(id) : showNode(id); setInspectorIntent({ id, tab, edit: tab === 'overview', key: crypto.randomUUID() }); }
   function resizeSection(id, params, phase) {
     if (turnId) return;
     if (phase === 'start') { setDraggingId(id); resizeBefore.current = { positions: { [id]: snapshotRef.current.view?.shape?.positions?.[id] || null }, sizes: { [id]: snapshotRef.current.view?.shape?.sizes?.[id] || null } }; }
@@ -611,22 +647,56 @@ export default function ShapeWorkspace() {
       setDraggingId(null); commitCanvasView({ positions: { [id]: position }, sizes: { [id]: { width: params.width, height: params.height } } }, resizeBefore.current);
     }
   }
-  function startDrag(_event, node) { dragBefore.current = { id: node.id, position: snapshotRef.current.view?.shape?.positions?.[node.id] || null }; setSelectedId(null); setSelectionIds([node.id]); setDraggingId(node.id); }
+  function captureGrab(event) {
+    const id = event.target.closest?.('.react-flow__node')?.dataset.id;
+    if (!id) { pointerGrab.current = null; return; }
+    const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const position = absoluteShapePosition(flow.getNodes(), id);
+    pointerGrab.current = { id, offset: { x: point.x - position.x, y: point.y - position.y } };
+  }
+  function startDrag(_event, node) { clearTimeout(viewTimer.current); dragBefore.current = { id: node.id, position: snapshotRef.current.view?.shape?.positions?.[node.id] || null, grab: pointerGrab.current?.id === node.id ? pointerGrab.current.offset : null }; setSelectedId(null); setSelectionIds([node.id]); setDraggingId(node.id); }
   function dragNode(event, node) { const target = shapeDropTarget(graph, flow.getNodes(), node.id, flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })); setDropId(target?.id || null); }
   async function finishDrag(event, node) {
     setDraggingId(null); setDropId(null);
     if (turnId) return;
-    const live = flow.getNodes(); const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    // The controlled store and callback can still contain the previous frame.
+    // Recover the final position from the release pointer and original grab offset.
+    const live = flow.getNodes().map((item) => item.id === node.id ? node : item); const point = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
     const target = shapeDropTarget(graph, live, node.id, point);
     const savedNode = graph.nodes.find((item) => item.id === node.id); const parentId = target?.id || currentFocus.id;
-    const absolute = absoluteShapePosition(live, node.id); const origin = target ? absoluteShapePosition(live, target.id) : { x: 0, y: 0 };
+    const grab = dragBefore.current?.grab;
+    const absolute = grab ? { x: point.x - grab.x, y: point.y - grab.y } : absoluteShapePosition(live, node.id); const origin = target ? absoluteShapePosition(live, target.id) : { x: 0, y: 0 };
     const desired = target ? { x: Math.max(12, absolute.x - origin.x), y: Math.max((target.data.headerHeight || 40) + 12, absolute.y - origin.y) } : absolute;
-    const position = target?.data.collapsed && parentId !== savedNode.parentId ? null : settleShapePosition(live, node.id, desired, target?.id || null);
+    const position = settleShapePosition(live, node.id, desired, target?.id || null);
     const patch = { positions: { [node.id]: position } }; const before = { positions: { [node.id]: dragBefore.current?.position || null } };
     if (parentId !== savedNode.parentId && parentId !== savedNode.id) {
-      const folded = new Set(collapsedIds || defaultShapeCollapsed(graph, currentFocus.id)); folded.delete(parentId); setCollapsedIds([...folded]);
-      await send({ type: 'moveNode', id: node.id, parentId }, { viewPatch: { shape: { ...patch, layoutVersion: 3 } }, undoView: { shape: before } });
+      const oldCollapsed = collapsedIds || defaultShapeCollapsed(graph, currentFocus.id);
+      const preview = reparentShapePreview(graph, live, node.id, parentId, position, oldCollapsed);
+      const undoPositions = Object.fromEntries(Object.keys(preview.positions).map((id) => [id, snapshotRef.current.view?.shape?.positions?.[id] || null]));
+      setOptimisticGraph(preview.graph); setViewPositions((current) => ({ ...current, ...preview.positions })); setCollapsedIds(preview.collapsedIds);
+      const saved = await send({ type: 'moveNode', id: node.id, parentId }, {
+        viewPatch: { shape: { layoutVersion: 3, positions: preview.positions, collapsedIds: preview.collapsedIds } },
+        undoView: { shape: { positions: undoPositions, collapsedIds: oldCollapsed } },
+      });
+      setOptimisticGraph(null);
+      if (!saved) { setCollapsedIds(oldCollapsed); setViewPositions(snapshotRef.current.view?.shape?.positions || {}); }
     } else await commitCanvasView(patch, before);
+  }
+  function finishConnection(event, state) {
+    const precise = completedConnection.current; completedConnection.current = null;
+    if (turnId || !state.fromNode) return;
+    const pointer = event.changedTouches?.[0] || event;
+    if (!Number.isFinite(pointer.clientX) || !Number.isFinite(pointer.clientY)) return;
+    const world = flow.screenToFlowPosition({ x: pointer.clientX, y: pointer.clientY });
+    const target = shapeConnectionTarget(flow.getNodes(), state.fromNode.id, world, 14 / flow.getViewport().zoom);
+    if (target) {
+      const sourceNode = flow.getNodes().find((node) => node.id === state.fromNode.id);
+      const source = shapePortPoint({ ...absoluteShapePosition(flow.getNodes(), state.fromNode.id), ...sourceNode.style }, connectionPort(state.fromHandle.id));
+      const port = targetShapePort(target.rect, source, world,
+        target.node.id === precise?.target ? connectionPort(precise.targetHandle) : null, 14 / flow.getViewport().zoom);
+      beginConnection({ source: state.fromNode.id, sourceHandle: state.fromHandle.id, target: target.node.id,
+        targetHandle: { left: 'in', right: 'out', top: 'top', bottom: 'bottom' }[port] });
+    } else if (precise) beginConnection(precise);
   }
   function beginConnection(connection) {
     if (turnId || !connection.source || !connection.target || connection.source === connection.target) return;
@@ -685,20 +755,21 @@ export default function ShapeWorkspace() {
       {sidebarOpen && <aside className="sm-sidebar is-open" aria-label="기능 레이어 패널">
         <div className="sm-layer-heading"><button onClick={() => focusNode(root.id)}><ShapeIcon name="grid" size={14} /><strong>레이어</strong><span>{productStates.length}</span></button><button className="sm-icon-button" aria-label="레이어 패널 닫기" onClick={() => setSidebarOpen(false)}><ShapeIcon name="close" size={14} /></button></div>
         <div className="sm-search"><ShapeIcon name="search" size={13} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="기능·ID 찾기" aria-label="기능 찾기" /><kbd>/</kbd></div>
-        <ShapeLayers graph={graph} rootId={root.id} states={states} collapsedIds={effectiveCollapsed} selectedIds={selectionIds} onToggle={toggleNode} onSelect={showNode} onFocus={focusNode} onMenu={menuAt} search={search} />
+        <ShapeLayers graph={graph} rootId={root.id} states={states} collapsedIds={effectiveCollapsed} selectedIds={selectionIds} onToggle={toggleNode} onSelect={selectLayer} onEdit={showNode} onFocus={focusNode} onMenu={menuAt} search={search} />
         <div className="sm-sidebar__bottom"><button onClick={openRepository}><ShapeIcon name="history" size={14} />레포 변경 기록<ShapeIcon name="arrow" size={13} /></button><span className="sm-local-file" title={snapshot.mapPath}><ShapeIcon name="code" size={13} />{snapshot.mapPath.split('/').at(-1)}</span><a className="sm-legacy-editor" href="?editor=1">원본·고급 편집<ShapeIcon name="code" size={12} /></a></div>
       </aside>}
       <section aria-label="무한 캔버스 제품 지도" className={`sm-stage${expandedCanvas ? ' is-expanded' : ''}`}>
         <h1 className="sm-sr-only">{currentFocus.label} 구성도</h1>
         <div className="sm-canvas" data-testid="shape-canvas" ref={canvasRef}>
-          <ReactFlow nodes={displayNodes} edges={canvasEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={.06} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch={false} zoomActivationKeyCode={null} panOnDrag selectionOnDrag selectionKeyCode="Shift" multiSelectionKeyCode={['Control', 'Meta']} nodesConnectable={!turnId} connectionMode={ConnectionMode.Loose} deleteKeyCode={null} colorMode="light"
+          <ReactFlow nodes={displayNodes} edges={canvasEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={.06} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false} zoomActivationKeyCode={null} autoPanOnNodeFocus={false} panOnDrag selectionOnDrag selectionKeyCode="Shift" multiSelectionKeyCode={['Control', 'Meta']} nodesConnectable={!turnId} connectionMode={ConnectionMode.Loose} connectionRadius={40} connectionLineComponent={ShapeConnectionPreview} deleteKeyCode={null} colorMode="light"
+            onPointerDownCapture={captureGrab}
             onNodesChange={changeNodes}
-            onNodeClick={(event, node) => { if (event.shiftKey || event.ctrlKey || event.metaKey) setSelectedId(null); else openNode(node.id); }}
+            onNodeClick={(event, node) => { if (event.shiftKey || event.ctrlKey || event.metaKey) setSelectedId(null); else activateNode(node.id); }}
             onPaneClick={() => { setSelectedId(null); setSelectionIds([]); setToolPopover(null); }} onPaneContextMenu={(event) => menuAt(event)} onNodeContextMenu={(event, node) => menuAt(event, node.id)} onEdgeContextMenu={(event, edge) => menuAt(event, null, edge.data?.link?.id)}
-            onNodeDragStart={startDrag} onNodeDrag={dragNode} onNodeDragStop={finishDrag} onConnect={beginConnection} onEdgeClick={(_event, edge) => editEdge(edge.data?.link?.id)}
+            onNodeDragStart={startDrag} onNodeDrag={dragNode} onNodeDragStop={finishDrag} onConnectStart={() => { completedConnection.current = null; }} onConnect={(connection) => { completedConnection.current = connection; }} onConnectEnd={finishConnection} onEdgeClick={(_event, edge) => editEdge(edge.data?.link?.id)}
             onMoveEnd={(_event, viewport) => { if (turnId || currentFocus.id !== root.id) return; clearTimeout(viewTimer.current); viewTimer.current = setTimeout(() => persistView({ viewport }), 450); }}>
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d7d7dc" />
-            <ShapeSectionTitles nodes={nodes} onSelect={openNode} onFocus={focusNode} />
+            <ShapeSectionTitles nodes={nodes} onSelect={activateNode} onFocus={focusNode} />
             {minimap && <MiniMap pannable zoomable nodeColor={(node) => ({ planned: '#e36a69', verified: '#6baf86', changed: '#719ddc', concern: '#d3af5a' }[node.data.state?.status] || '#dedee2')} />}
           </ReactFlow>
           <div className="sm-canvas-toolbar" aria-label="지도 도구">
@@ -712,8 +783,9 @@ export default function ShapeWorkspace() {
           </div>
           {Object.values(lensSelections).some(Boolean) && <button className="sm-active-conditions" onClick={() => setLensSelections({})}>{graph.lenses.map((lens) => lens.options.find((option) => option.id === lensSelections[lens.id])?.label).filter(Boolean).join(' · ')}<ShapeIcon name="close" size={12} /></button>}
           {selectedTurn && <div className="sm-replay-badge"><ShapeIcon name="history" size={14} />턴 {selectedTurn.number} · {selectedTurn.title}<button onClick={() => chooseTurn(null)}>현재로 돌아가기<ShapeIcon name="arrow" size={13} /></button></div>}
-          <div className="sm-creation-dock" aria-label="캔버스 편집 도구"><button aria-label="기능 블록 추가" disabled={Boolean(turnId) || busy} onClick={() => openCreate('block')}><ShapeIcon name="plus" size={18} /><span>블록</span></button><button aria-label="섹션 추가" disabled={Boolean(turnId) || busy} onClick={() => openCreate('section')}><ShapeIcon name="grid" size={17} /><span>섹션</span></button><i /><button aria-label="실행 취소" disabled={!undoStack.length || busy || Boolean(turnId)} onClick={() => changeHistory('undo')}><ShapeIcon name="undo" size={16} /></button><button aria-label="다시 실행" disabled={!redoStack.length || busy || Boolean(turnId)} onClick={() => changeHistory('redo')}><ShapeIcon name="redo" size={16} /></button></div>
+          <div className="sm-bottom-tools"><div className="sm-creation-dock" aria-label="캔버스 편집 도구"><button aria-label="기능 블록 추가" disabled={Boolean(turnId) || busy} onClick={() => openCreate('block')}><ShapeIcon name="plus" size={18} /><span>블록</span></button><button aria-label="섹션 추가" disabled={Boolean(turnId) || busy} onClick={() => openCreate('section')}><ShapeIcon name="grid" size={17} /><span>섹션</span></button><i /><button aria-label="실행 취소" disabled={!undoStack.length || busy || Boolean(turnId)} onClick={() => changeHistory('undo')}><ShapeIcon name="undo" size={16} /></button><button aria-label="다시 실행" disabled={!redoStack.length || busy || Boolean(turnId)} onClick={() => changeHistory('redo')}><ShapeIcon name="redo" size={16} /></button></div>
           <ShapeZoomControls centeredZoom={centeredZoom} fitDiagram={fitDiagram} expandedCanvas={expandedCanvas} onExpand={() => { setExpandedCanvas(!expandedCanvas); setSidebarOpen(false); }} minimap={minimap} onMinimap={() => setMinimap(!minimap)} />
+          </div>
         </div>
         {timelineOpen && <footer className="sm-timeline" aria-label="개발 턴 타임라인">
           <div className="sm-timeline__heading"><div><ShapeIcon name="history" size={15} /><strong>{selectedTurn ? `턴 ${selectedTurn.number}` : '현재 형상'}</strong><span>{selectedTurn ? selectedTurn.title : `기록된 턴 ${turns.length}개`}</span></div><button className="sm-button sm-button--small" onClick={() => setDialog('changes')} disabled={!previousTurn}>지난 변경 {diff.changedIds.length}</button><button className="sm-button sm-button--small" disabled={Boolean(turnId) || busy} onClick={() => openCreate('turn')}>턴 기록</button><button className="sm-icon-button" aria-label="턴 타임라인 닫기" onClick={() => { setTimelineOpen(false); setPlaying(false); }}><ShapeIcon name="close" size={14} /></button></div>

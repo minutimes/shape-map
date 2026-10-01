@@ -165,13 +165,21 @@ Sequences retain authored order. Deep branches never squeeze descendants narrowe
 with each level. The full label remains canonical and accessible; compact tiles
 show the name before a descriptive separator when a label is long, with up to
 two visible lines. Complete names and authored descriptions appear in the editor.
-The fold button expands parts on the same canvas. Card clicks open details;
-the separate focus button enters an area. Connections between containers attach
-to their boundaries by default; the detailed-connections control exposes their
+Card clicks expand or fold parts on the same canvas; leaf clicks select them.
+The pencil opens attached details. Folding anchors the clicked card on screen
+without changing zoom or fitting the whole diagram. Saved open sizes return on
+expansion. Reparent drops preview the new parent and final pointer position
+together, then install the saved source and view together. Whole-card connection
+targets prefer the deepest visible card; section background targets its section.
+Four exact ports remain available. The target outline and committed connection
+use the same targeting rule. The status text, minimap, and bottom controls each
+reserve their own space. The separate focus button enters an area. Connections
+between containers attach to their boundaries by default; the detailed-connections control exposes their
 saved endpoints. Only an explicit sequence or recorded connection creates a
 flow arrow. Function hierarchy is progressive: enter a feature to see its parts.
-Phones use one column with a readable initial zoom. Tablet and desktop diagrams
-retain their horizontal composition. Composition cards do not create floating
+The diagram retains its horizontal composition on all screen sizes; compact
+controls adapt to the available width without rearranging authored cards.
+Composition cards do not create floating
 title capsules on zoom out. The function hierarchy retains its overview labels.
 The canvas can expand within the app for broad diagrams; the fit control includes
 all cards, return routes, and labels.
@@ -179,7 +187,7 @@ Connection routing reserves parent title bands and handles unequal grid heights.
 When a dense diagram has no clear space for an inline explanation, the complete
 saved text remains on edge hover and in the connection inspector.
 
-Selecting a card opens a nonmodal editor attached beside its screen position,
+The pencil opens a nonmodal editor attached beside the card's screen position,
 with a leader back to the selected card. Panning and zooming move the attachment
 without resizing the canvas. The editor switches sides or uses a contained sheet
 on small screens. Hidden descendants attach to their nearest visible ancestor.

@@ -42,7 +42,7 @@ function lines(text, width, size) {
 }
 
 /** All three views project the same saved nodes. Position never changes parentage. */
-export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, sizes: customSizes = {}, states = {}, onOpen, onFocus, onToggle, onResize, collapsedIds, reading = {}, showActivation = false, detailedLinks = false, availableWidth = 1500, compact = false, singleColumn = false } = {}) {
+export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, sizes: customSizes = {}, states = {}, onOpen, onActivate, onFocus, onToggle, onResize, collapsedIds, reading = {}, showActivation = false, detailedLinks = false, availableWidth = 1500, compact = false, singleColumn = false } = {}) {
   const system = splitMapSections(graph).system;
   const nodes = system.nodes;
   const root = nodes.find((node) => node.id === focusId) || nodes.find((node) => !node.parentId);
@@ -50,7 +50,7 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   const children = new Map(nodes.map((node) => [node.id, []]));
   nodes.forEach((node) => children.get(node.parentId)?.push(node));
   const data = (node) => ({ node, state: states[node.id] || { status: 'neutral', commentCount: 0 },
-    childCount: children.get(node.id)?.length || 0, onOpen, onFocus, onToggle, mode, reading: reading[node.id], verticalHierarchy: compact && mode === 'function' });
+    childCount: children.get(node.id)?.length || 0, onOpen, onActivate: onActivate || onToggle || onOpen, onFocus, onToggle, mode, reading: reading[node.id], verticalHierarchy: compact && mode === 'function' });
   const place = (node, type, x, y, width, height, extras = {}) => ({
     id: node.id, type, position: { x, y },
     data: data(node), style: { width, height }, ...extras,

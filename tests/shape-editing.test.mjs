@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { parseSource, writeSource } from '../lib/format.mjs';
 import { applyOperation } from '../lib/graph.mjs';
 import { captureTurn } from '../lib/shape.mjs';
-import { shapeLayout } from '../src/shapeLayout.js';
-import { shapeHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption } from '../src/shapeEditing.js';
+import { shapeLayout, absoluteShapePosition } from '../src/shapeLayout.js';
+import { shapeHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, shapeConnectionTarget, facingShapePort, shapePortPoint, targetShapePort, reparentShapePreview } from '../src/shapeEditing.js';
 
 const fixture = () => parseSource(`flowchart LR
 %% mlc-format: 1
@@ -94,5 +94,43 @@ describe('studio editing contracts', () => {
     expect(parent.style.width).toBeGreaterThanOrEqual(900); expect(parent.style.height).toBeGreaterThanOrEqual(600);
     expect(child.position).toEqual({ x: 610, y: 300 });
     expect(child.position.x + child.style.width).toBeLessThanOrEqual(parent.style.width);
+  });
+  it('connects to the body of the deepest card, its surrounding section, and the nearby outer border', () => {
+    const nodes = [
+      { id: 'source', position: { x: 0, y: 0 }, style: { width: 220, height: 80 } },
+      { id: 'section', position: { x: 400, y: 0 }, style: { width: 600, height: 400 } },
+      { id: 'child', parentId: 'section', position: { x: 30, y: 100 }, style: { width: 220, height: 80 } },
+    ];
+    expect(shapeConnectionTarget(nodes, 'source', { x: 530, y: 140 }).node.id).toBe('child');
+    expect(shapeConnectionTarget(nodes, 'source', { x: 800, y: 300 }).node.id).toBe('section');
+    expect(shapeConnectionTarget(nodes, 'source', { x: 1010, y: 300 }, 14).node.id).toBe('section');
+    expect(shapeConnectionTarget(nodes, 'source', { x: 1040, y: 300 }, 14)).toBeNull();
+    expect(shapeConnectionTarget(nodes, 'source', { x: 110, y: 40 })).toBeNull();
+    expect(shapeConnectionTarget(nodes, 'child', { x: 530, y: 140 })).toBeNull();
+    expect(shapeConnectionTarget(nodes, 'section', { x: 530, y: 140 }).node.id).toBe('child');
+    const rect = { x: 400, y: 100, width: 220, height: 80 };
+    expect(facingShapePort(rect, { x: 100, y: 140 })).toBe('left');
+    expect(facingShapePort(rect, { x: 510, y: 0 })).toBe('top');
+    expect(shapePortPoint(rect, 'left')).toEqual({ x: 400, y: 140 });
+    expect(targetShapePort(rect, { x: 100, y: 140 }, { x: 510, y: 140 }, 'top')).toBe('left');
+    expect(targetShapePort(rect, { x: 100, y: 140 }, { x: 510, y: 105 }, 'top')).toBe('top');
+  });
+  it('previews a reparent at the dropped position while preserving the target and neighboring area positions', () => {
+    const graph = applyOperation(fixture(), { type: 'setNodeWorkflow', id: 'b', workflow: { mode: 'group' } });
+    const before = structuredClone(graph);
+    const nodes = shapeLayout(graph, { collapsedIds: [] }).nodes;
+    const preview = reparentShapePreview(graph, nodes, 'child', 'b', { x: 50, y: 130 }, ['b']);
+    const next = shapeLayout(preview.graph, { positions: preview.positions, collapsedIds: preview.collapsedIds }).nodes;
+    expect(next.find((node) => node.id === 'child')).toMatchObject({ parentId: 'b', position: { x: 50, y: 130 } });
+    for (const id of ['a', 'b']) expect(absoluteShapePosition(next, id)).toEqual(absoluteShapePosition(nodes, id));
+    expect(preview.collapsedIds).toEqual([]);
+    expect(graph).toEqual(before);
+  });
+  it('folds a resized section into a small card and restores its open size without losing the saved size', () => {
+    const graph = fixture(); const sizes = { a: { width: 900, height: 600 } };
+    const folded = shapeLayout(graph, { sizes, collapsedIds: ['a'] }).nodes.find((node) => node.id === 'a');
+    expect(folded.style.width).toBe(340); expect(folded.style.height).toBeLessThan(100);
+    expect(shapeLayout(graph, { sizes, collapsedIds: [] }).nodes.find((node) => node.id === 'a').style).toEqual({ width: 900, height: 600 });
+    expect(sizes).toEqual({ a: { width: 900, height: 600 } });
   });
 });
