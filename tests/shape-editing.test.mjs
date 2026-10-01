@@ -3,7 +3,7 @@ import { parseSource, writeSource } from '../lib/format.mjs';
 import { applyOperation } from '../lib/graph.mjs';
 import { captureTurn } from '../lib/shape.mjs';
 import { shapeLayout, absoluteShapePosition } from '../src/shapeLayout.js';
-import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, shapeConnectionTarget, facingShapePort, shapePortPoint, targetShapePort, reparentShapePreview } from '../src/shapeEditing.js';
+import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, shapeConnectionTarget, shapeConnectionAtPoint, facingShapePort, shapePortPoint, targetShapePort, reparentShapePreview } from '../src/shapeEditing.js';
 
 const fixture = () => parseSource(`flowchart LR
 %% mlc-format: 1
@@ -125,17 +125,30 @@ describe('studio editing contracts', () => {
     expect(shapePortPoint(rect, 'left')).toEqual({ x: 400, y: 140 });
     expect(targetShapePort(rect, { x: 100, y: 140 }, { x: 510, y: 140 }, 'top')).toBe('left');
     expect(targetShapePort(rect, { x: 100, y: 140 }, { x: 510, y: 105 }, 'top')).toBe('top');
+    expect(shapeConnectionAtPoint(nodes, 'source', { x: 220, y: 40 }, { x: 530, y: 140 }, 14,
+      { target: 'section', targetHandle: 'top' })).toMatchObject({ node: { id: 'child' }, port: 'left', point: { x: 430, y: 140 } });
+    expect(shapeConnectionAtPoint(nodes, 'source', { x: 220, y: 40 }, { x: 1100, y: 700 }, 14,
+      { target: 'section', targetHandle: 'in' })).toBeNull();
   });
   it('previews a reparent at the dropped position while preserving the target and neighboring area positions', () => {
     const graph = applyOperation(fixture(), { type: 'setNodeWorkflow', id: 'b', workflow: { mode: 'group' } });
     const before = structuredClone(graph);
-    const nodes = shapeLayout(graph, { collapsedIds: [] }).nodes;
+    const nodes = shapeLayout(graph, { collapsedIds: [], positions: { b: { x: 600, y: 0 } } }).nodes;
     const preview = reparentShapePreview(graph, nodes, 'child', 'b', { x: 50, y: 130 }, ['b']);
     const next = shapeLayout(preview.graph, { positions: preview.positions, collapsedIds: preview.collapsedIds }).nodes;
     expect(next.find((node) => node.id === 'child')).toMatchObject({ parentId: 'b', position: { x: 50, y: 130 } });
     for (const id of ['a', 'b']) expect(absoluteShapePosition(next, id)).toEqual(absoluteShapePosition(nodes, id));
     expect(preview.collapsedIds).toEqual([]);
     expect(graph).toEqual(before);
+  });
+  it('keeps saved reparent coordinates as preferences while clearing a neighboring area that grows', () => {
+    const graph = applyOperation(fixture(), { type: 'setNodeWorkflow', id: 'b', workflow: { mode: 'group' } });
+    const nodes = shapeLayout(graph, { collapsedIds: [] }).nodes;
+    const preview = reparentShapePreview(graph, nodes, 'child', 'b', { x: 50, y: 130 }, []);
+    const next = shapeLayout(preview.graph, { positions: preview.positions, collapsedIds: [] }).nodes;
+    const a = next.find((node) => node.id === 'a'); const b = next.find((node) => node.id === 'b');
+    expect(b.position.x).toBeGreaterThanOrEqual(a.position.x + a.style.width + 12);
+    expect(preview.positions.b).toEqual(nodes.find((node) => node.id === 'b').position);
   });
   it('folds a resized section into a small card and restores its open size without losing the saved size', () => {
     const graph = fixture(); const sizes = { a: { width: 900, height: 600 } };

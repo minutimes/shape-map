@@ -18,7 +18,7 @@ import ShapeConnectionPreview from './ShapeConnectionPreview.jsx';
 import TaskFields from './TaskFields.jsx';
 import { useCenteredZoom } from './useCenteredZoom.js';
 import { readableNodeViewport } from './viewport.js';
-import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort, shapeConnectionTarget, targetShapePort, shapePortPoint, reparentShapePreview } from './shapeEditing.js';
+import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort, shapeConnectionAtPoint, shapePortPoint, reparentShapePreview } from './shapeEditing.js';
 import './shapeWorkspace.css';
 
 const nodeTypes = { shapeBlock: ShapeBlock, shapeGroup: ShapeGroup };
@@ -458,7 +458,7 @@ export default function ShapeWorkspace() {
   useEffect(() => {
     if (!snapshot || restoredMap.current === snapshot.mapPath) return;
     restoredMap.current = snapshot.mapPath;
-    if (!focusId && snapshot.view?.shape?.layoutVersion === 3) {
+    if ((!focusId || focusId === root?.id) && snapshot.view?.shape?.layoutVersion === 3) {
       setViewPositions(snapshot.view.shape.positions || {}); setViewSizes(snapshot.view.shape.sizes || {});
       setCollapsedIds(snapshot.view.shape.collapsedIds || null);
     }
@@ -467,7 +467,7 @@ export default function ShapeWorkspace() {
     if (!graph) return;
     const timer = setTimeout(() => {
       const view = snapshotRef.current?.view?.shape;
-      const saved = view?.layoutVersion === 3 && !focusId && windowWidth > 900 && !expandedCanvas && !turnId && !detailedLinks && !showActivation && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
+      const saved = view?.layoutVersion === 3 && (!focusId || focusId === root?.id) && windowWidth > 900 && !expandedCanvas && !turnId && !detailedLinks && !showActivation && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
       if (saved) flow.setViewport(saved);
       else if (currentFocus?.id === root?.id || mode === 'function' || expandedCanvas) fitDiagram();
       else flow.setViewport({ x: 28, y: 80, zoom: .8 });
@@ -705,19 +705,19 @@ export default function ShapeWorkspace() {
   }
   function finishConnection(event, state) {
     const precise = completedConnection.current; completedConnection.current = null;
-    if (turnId || !state.fromNode) return;
+    if (turnId || !state.fromNode || !state.fromHandle) return;
     const pointer = event.changedTouches?.[0] || event;
     if (!Number.isFinite(pointer.clientX) || !Number.isFinite(pointer.clientY)) return;
     const world = flow.screenToFlowPosition({ x: pointer.clientX, y: pointer.clientY });
-    const target = shapeConnectionTarget(flow.getNodes(), state.fromNode.id, world, 14 / flow.getViewport().zoom);
+    const nodes = flow.getNodes();
+    const sourceNode = nodes.find((node) => node.id === state.fromNode.id);
+    if (!sourceNode) return;
+    const source = state.from || shapePortPoint({ ...absoluteShapePosition(nodes, state.fromNode.id), ...sourceNode.style }, connectionPort(state.fromHandle.id));
+    const target = shapeConnectionAtPoint(nodes, state.fromNode.id, source, world, 14 / flow.getViewport().zoom, precise);
     if (target) {
-      const sourceNode = flow.getNodes().find((node) => node.id === state.fromNode.id);
-      const source = shapePortPoint({ ...absoluteShapePosition(flow.getNodes(), state.fromNode.id), ...sourceNode.style }, connectionPort(state.fromHandle.id));
-      const port = targetShapePort(target.rect, source, world,
-        target.node.id === precise?.target ? connectionPort(precise.targetHandle) : null, 14 / flow.getViewport().zoom);
       beginConnection({ source: state.fromNode.id, sourceHandle: state.fromHandle.id, target: target.node.id,
-        targetHandle: { left: 'in', right: 'out', top: 'top', bottom: 'bottom' }[port] });
-    } else if (precise) beginConnection(precise);
+        targetHandle: { left: 'in', right: 'out', top: 'top', bottom: 'bottom' }[target.port] });
+    }
   }
   function beginConnection(connection) {
     if (turnId || !connection.source || !connection.target || connection.source === connection.target) return;

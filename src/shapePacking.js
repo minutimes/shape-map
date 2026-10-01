@@ -21,6 +21,25 @@ function rows(sizes, limit, gap) {
   return { slots, width, height: y + rowHeight };
 }
 
+/** Saved positions are preferences, not permission for siblings to overlap.
+ * Resolve collisions in reading order without changing the saved coordinates,
+ * so folding or undo restores the original arrangement. */
+export function settleShapeSlots(sizes, desired, { gap = 12, columnGap = gap, rowGap = gap } = {}) {
+  const placed = [];
+  return desired.map((slot, index) => {
+    const position = { ...slot }; const size = sizes[index];
+    for (let step = 0; step < index; step += 1) {
+      const obstacle = placed.find((rect) => position.x < rect.x + rect.width + gap && position.x + size.width + gap > rect.x
+        && position.y < rect.y + rect.height + gap && position.y + size.height + gap > rect.y);
+      if (!obstacle) break;
+      if (Math.abs(slot.y - obstacle.desired.y) <= gap && slot.x > obstacle.desired.x) position.x = obstacle.x + obstacle.width + columnGap;
+      else position.y = obstacle.y + obstacle.height + rowGap;
+    }
+    placed.push({ ...position, ...size, desired: slot });
+    return position;
+  });
+}
+
 /** Ordered, two-dimensional packing. A deep branch grows its container instead
  * of squeezing every descendant into a progressively narrower vertical list. */
 export function measureShapeCard(node, children, collapsed, depth = 0, compact = false, custom = {}) {
@@ -63,10 +82,11 @@ export function measureShapeCard(node, children, collapsed, depth = 0, compact =
   const titleHeight = titleLines(shapeCardTitle(node, depth), width - inset * 2, depth ? 14 : 18) * (depth ? 20 : 24);
   const description = !depth && Boolean(node.block?.summary || node.task?.logic);
   const header = (depth ? 40 : 46) + titleHeight + (description ? 30 : 0);
-  const slots = packed.slots.map((slot, index) => {
+  const desired = packed.slots.map((slot, index) => {
     const saved = custom.positions?.[items[index].id];
     return { x: Math.max(inset, saved?.x ?? slot.x + inset), y: Math.max(header + inset, saved?.y ?? slot.y + header + inset) };
   });
+  const slots = settleShapeSlots(sizes, desired, { gap });
   width = Math.max(width, ...slots.map((slot, index) => slot.x + sizes[index].width + inset));
   const height = Math.max(header + packed.height + inset * 2, custom.sizes?.[node.id]?.height || 0, ...slots.map((slot, index) => slot.y + sizes[index].height + inset));
   const minimumWidth = Math.max(packed.width + inset * 2, ...slots.map((slot, index) => slot.x + sizes[index].width + inset));

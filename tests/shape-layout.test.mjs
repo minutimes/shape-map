@@ -13,6 +13,39 @@ const fixture = () => ({ direction: 'LR', categories: [], nodes: [
 ] });
 
 describe('three projections of one product map', () => {
+  it('makes room for expanded cards at every level without replacing authored positions', () => {
+    const graph = { direction: 'LR', categories: [], nodes: [
+      { id: 'root', label: '제품' },
+      ...['area', 'next', 'third', 'below'].map((id) => ({ id, label: id, parentId: 'root' })),
+      ...['first', 'branch', 'thirdCard', 'following', 'fifth', 'last'].map((id) => ({ id, label: id, parentId: 'area' })),
+      ...Array.from({ length: 9 }, (_, i) => ({ id: `part${i}`, label: '내부 기능', parentId: 'branch' })),
+    ] };
+    const folded = shapeLayout(graph, { collapsedIds: ['branch'] });
+    const positions = Object.fromEntries(folded.nodes.map((node) => [node.id, { ...node.position }]));
+    positions.third = { x: 5000, y: 2000 }; // A distant authored area stays put.
+    const before = structuredClone({ graph, positions });
+    const expanded = shapeLayout(graph, { positions, collapsedIds: [] });
+    for (const node of expanded.nodes) {
+      for (const other of expanded.nodes.filter((item) => item.id !== node.id && item.parentId === node.parentId)) {
+        const overlap = node.position.x < other.position.x + other.style.width && node.position.x + node.style.width > other.position.x
+          && node.position.y < other.position.y + other.style.height && node.position.y + node.style.height > other.position.y;
+        expect(overlap, `${node.id} overlaps ${other.id}`).toBe(false);
+      }
+      if (node.parentId) {
+        const parent = expanded.nodes.find((item) => item.id === node.parentId);
+        expect(node.position.x + node.style.width).toBeLessThanOrEqual(parent.style.width);
+        expect(node.position.y + node.style.height).toBeLessThanOrEqual(parent.style.height);
+      }
+    }
+    expect(expanded.nodes.find((node) => node.id === 'following').position.y).toBeGreaterThan(positions.following.y);
+    expect(expanded.nodes.find((node) => node.id === 'next').position.x).toBeGreaterThan(positions.next.x);
+    expect(expanded.nodes.find((node) => node.id === 'below').position.y).toBeGreaterThan(positions.below.y);
+    expect(expanded.nodes.find((node) => node.id === 'third').position).toEqual(positions.third);
+    const closedAgain = shapeLayout(graph, { positions, collapsedIds: ['branch'] });
+    expect(closedAgain.nodes.map((node) => ({ id: node.id, position: node.position, size: node.style }))).toEqual(
+      folded.nodes.map((node) => ({ id: node.id, position: positions[node.id], size: node.style })));
+    expect({ graph, positions }).toEqual(before);
+  });
   it('groups by saved parent IDs and preserves deep branches and references in the source', () => {
     const graph = fixture(); const before = structuredClone(graph);
     const system = shapeLayout(graph, { collapsedIds: [] });

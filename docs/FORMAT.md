@@ -87,8 +87,14 @@ The product canvas also stores optional `shape.sizes` keyed by feature ID with
 `{width,height}` (168×72 to 30000×30000). Coordinates inside a section are relative
 to that section. A `null` entry in a shape position or size patch removes the
 override for undo; deleted feature entries are filtered. Sizes are spatial view
-state and never replace the canonical Mermaid hierarchy or feature meaning. It
-may also contain independent workflow navigation state:
+state and never replace the canonical Mermaid hierarchy or feature meaning.
+
+Shape positions are placement preferences. When an expanded card or section
+would overlap a sibling, the canvas gives it room in reading order and grows its
+container. This derived spacing does not overwrite saved positions. Folding or
+undoing the expansion restores the arrangement from those same preferences.
+
+The view may also contain independent workflow navigation state:
 
 ```json
 {

@@ -1,5 +1,5 @@
 import { splitMapSections } from './mapScope.js';
-import { measureShapeCard, shapeCardTitle } from './shapePacking.js';
+import { measureShapeCard, shapeCardTitle, settleShapeSlots } from './shapePacking.js';
 
 export const SHAPE_VIEWS = [
   { id: 'system', label: '시스템 구성도', description: '어떤 기능이 모여 제품을 이루는지 봅니다.' },
@@ -94,6 +94,7 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   const columns = compact ? 1 : root.workflow?.mode === 'sequence' ? groups.length : wholeSystem ? 3 : 2;
   const sizes = groups.map((group) => measureShapeCard(group, children, collapsed, 0, compact, { sizes: customSizes, positions }));
   const columnGap = wholeSystem ? 60 : 80;
+  const rowGap = wholeSystem ? 120 : 86;
   const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(0, ...sizes.filter((_, index) => index % columns === column).map((size) => size.width)));
   const draw = (node, x, y, depth, parentId, size) => {
     const card = place(node, size.group ? 'shapeGroup' : 'shapeBlock', x, y, size.width, size.height,
@@ -105,18 +106,19 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
       draw(child, size.slots[index].x, size.slots[index].y, depth + 1, node.id, size.sizes[index]);
     });
   };
-  let rowY = 0;
+  const desired = []; let rowY = 0;
   for (let row = 0; row < Math.ceil(groups.length / columns); row += 1) {
     let rowHeight = 0; let columnX = 0;
     groups.slice(row * columns, (row + 1) * columns).forEach((group, column) => {
       const size = sizes[row * columns + column];
       rowHeight = Math.max(rowHeight, size.height);
-      const position = positions[group.id] || { x: columnX, y: rowY };
-      draw(group, position.x, position.y, 0, null, size);
+      desired.push(positions[group.id] || { x: columnX, y: rowY });
       columnX += columnWidths[column] + columnGap;
     });
-    rowY += rowHeight + (wholeSystem ? 120 : 86);
+    rowY += rowHeight + rowGap;
   }
+  const slots = settleShapeSlots(sizes, desired, { columnGap, rowGap });
+  groups.forEach((group, index) => draw(group, slots[index].x, slots[index].y, 0, null, sizes[index]));
   const visible = new Map(result.map((node) => [node.id, node]));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const project = (id) => { let node = byId.get(id); while (node && !visible.has(node.id)) node = byId.get(node.parentId); return node?.id; };

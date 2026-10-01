@@ -153,6 +153,16 @@ export function targetShapePort(rect, source, pointer, explicitPort, precisionRa
     ? explicitPort : facingShapePort(rect, source);
 }
 
+/** Preview and release share one world-space target; native handle snaps are
+ * considered only when the pointer is actually over the same visible card. */
+export function shapeConnectionAtPoint(nodes, sourceId, source, pointer, tolerance = 14, precise = null) {
+  const target = shapeConnectionTarget(nodes, sourceId, pointer, tolerance);
+  if (!target) return null;
+  const port = targetShapePort(target.rect, source, pointer,
+    precise?.target === target.node.id ? connectionPort(precise.targetHandle) : null, tolerance);
+  return { ...target, port, point: shapePortPoint(target.rect, port) };
+}
+
 /** Preview a reparent at the drop position, without repacking the entire map. */
 export function reparentShapePreview(graph, nodes, id, parentId, position, collapsedIds) {
   return {

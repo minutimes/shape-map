@@ -20,6 +20,8 @@ windows adapt the controls while retaining the same canvas arrangement and posit
 
 Cards can contain more cards at any depth. Click a card to expand or fold its
 contents in place. The clicked card stays at the same screen position and zoom.
+Expanding a card makes room among its siblings and neighboring sections. Folding
+it again restores the authored positions; automatic spacing does not overwrite them.
 Use its pencil to read and edit its role, notes, proposal, attributes, connections,
 and recorded changes. A leaf click selects it. Its stable ID has a copy
 button. **구성·변경 설명** provides a plain-language explanation of the current
@@ -36,6 +38,8 @@ The deepest visible card under the pointer takes priority; section background
 connects to the section. A highlighted outline previews the target. Exact ports
 still work when a particular side matters. Click the line or label to edit the
 explanation, condition, or relationship. **연결선** controls detail and model links.
+The preview and drop share the same target coordinates at every zoom and pan.
+Releasing over blank canvas cancels the connection.
 
 | Shortcut | Action |
 | --- | --- |

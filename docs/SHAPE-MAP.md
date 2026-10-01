@@ -8,7 +8,8 @@ folding deeper containers, with the main handoffs. Explicit
 area relationships remain visible; **Detailed connections** exposes the smaller
 data connections. Entering an area opens deeper nested cards. An explicit focus
 link opens that area at a readable scale rather than restoring a different view's
-saved camera. Reference notes remain in the source but are excluded from product
+saved camera. A link to the whole-system root restores its saved canvas state,
+just like the home route. Reference notes remain in the source but are excluded from product
 feature counts and color totals.
 
 ## Canonical metadata
