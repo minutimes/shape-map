@@ -23,20 +23,21 @@ function rows(sizes, limit, gap) {
 
 /** Ordered, two-dimensional packing. A deep branch grows its container instead
  * of squeezing every descendant into a progressively narrower vertical list. */
-export function measureShapeCard(node, children, collapsed, depth = 0, compact = false) {
+export function measureShapeCard(node, children, collapsed, depth = 0, compact = false, custom = {}) {
   const all = children.get(node.id) || [];
   const items = collapsed.has(node.id) ? [] : all;
   const inset = depth ? 12 : 18;
   const gap = depth ? 12 : 18;
   const tileWidth = compact ? 288 : 220;
-  const group = all.length > 0;
+  const group = all.length > 0 || Boolean(node.workflow);
   if (!items.length) {
-    const width = depth ? tileWidth : compact ? 340 : 340;
+    const emptySection = group && !all.length;
+    const width = Math.max(depth ? tileWidth : 340, emptySection ? 480 : 0, custom.sizes?.[node.id]?.width || 0);
     const titleHeight = Math.min(depth ? 2 : Infinity, titleLines(shapeCardTitle(node, depth), width - 28, depth ? 14 : 18)) * (depth ? 20 : 24);
     const header = (depth ? 32 : 44) + titleHeight;
-    return { width, height: header + 6, header, group, items: [], sizes: [], slots: [] };
+    return { width, height: Math.max(header + 6, emptySection ? 240 : 0, custom.sizes?.[node.id]?.height || 0), minimumWidth: Math.max(depth ? tileWidth : 340, emptySection ? 480 : 0), minimumHeight: Math.max(header + 6, emptySection ? 240 : 0), header, group, items: [], sizes: [], slots: [] };
   }
-  const sizes = items.map((child) => measureShapeCard(child, children, collapsed, depth + 1, compact));
+  const sizes = items.map((child) => measureShapeCard(child, children, collapsed, depth + 1, compact, custom));
   const widest = Math.max(...sizes.map((size) => size.width));
   const area = sizes.reduce((sum, size) => sum + size.width * size.height, 0);
   const tiles = sizes.every((size) => !size.items.length);
@@ -55,10 +56,17 @@ export function measureShapeCard(node, children, collapsed, depth = 0, compact =
     limit = Math.max(pair, Math.min(depth ? 1100 : 1600, Math.sqrt(area * 2.2)));
   }
   const packed = rows(sizes, limit, gap);
-  const width = Math.max(compact && !depth ? 340 : 0, packed.width + inset * 2);
+  let width = Math.max(compact && !depth ? 340 : 0, packed.width + inset * 2, custom.sizes?.[node.id]?.width || 0);
   const titleHeight = titleLines(shapeCardTitle(node, depth), width - inset * 2, depth ? 14 : 18) * (depth ? 20 : 24);
   const description = !depth && Boolean(node.block?.summary || node.task?.logic);
   const header = (depth ? 40 : 46) + titleHeight + (description ? 30 : 0);
-  return { width, height: header + packed.height + inset * 2, header, group: true,
-    items, sizes, slots: packed.slots.map((slot) => ({ x: slot.x + inset, y: slot.y + header + inset })), description };
+  const slots = packed.slots.map((slot, index) => {
+    const saved = custom.positions?.[items[index].id];
+    return { x: Math.max(inset, saved?.x ?? slot.x + inset), y: Math.max(header + inset, saved?.y ?? slot.y + header + inset) };
+  });
+  width = Math.max(width, ...slots.map((slot, index) => slot.x + sizes[index].width + inset));
+  const height = Math.max(header + packed.height + inset * 2, custom.sizes?.[node.id]?.height || 0, ...slots.map((slot, index) => slot.y + sizes[index].height + inset));
+  const minimumWidth = Math.max(packed.width + inset * 2, ...slots.map((slot, index) => slot.x + sizes[index].width + inset));
+  const minimumHeight = Math.max(header + packed.height + inset * 2, ...slots.map((slot, index) => slot.y + sizes[index].height + inset));
+  return { width, height, minimumWidth, minimumHeight, header, group: true, items, sizes, slots, description };
 }

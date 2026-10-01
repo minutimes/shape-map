@@ -1,8 +1,8 @@
-export const BLOCK_DRAFT_FIELDS = ['label', 'summary', 'reason', 'logic', 'files'];
+export const BLOCK_DRAFT_FIELDS = ['label', 'summary', 'reason', 'purpose', 'successCriteria', 'logic', 'files'];
 
 export function blockDraftValues(node) {
   return { label: node.label, summary: node.block?.summary || node.task?.logic || '',
-    reason: node.proposal?.reason || '', logic: node.proposal?.logic || '', files: (node.block?.files || []).join('\n') };
+    reason: node.proposal?.reason || '', purpose: node.proposal?.purpose || '', successCriteria: node.proposal?.successCriteria || '', logic: node.proposal?.logic || '', files: (node.block?.files || []).join('\n') };
 }
 
 export function draftConflicts(draft, base, current) {

@@ -42,7 +42,7 @@ function lines(text, width, size) {
 }
 
 /** All three views project the same saved nodes. Position never changes parentage. */
-export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, states = {}, onOpen, onFocus, onToggle, collapsedIds, reading = {}, showActivation = false, detailedLinks = false, availableWidth = 1500, compact = false, singleColumn = false } = {}) {
+export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, sizes: customSizes = {}, states = {}, onOpen, onFocus, onToggle, onResize, collapsedIds, reading = {}, showActivation = false, detailedLinks = false, availableWidth = 1500, compact = false, singleColumn = false } = {}) {
   const system = splitMapSections(graph).system;
   const nodes = system.nodes;
   const root = nodes.find((node) => node.id === focusId) || nodes.find((node) => !node.parentId);
@@ -92,14 +92,14 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   const result = [];
   const wholeSystem = !root.parentId;
   const columns = compact ? 1 : root.workflow?.mode === 'sequence' ? groups.length : wholeSystem ? 3 : 2;
-  const sizes = groups.map((group) => measureShapeCard(group, children, collapsed, 0, compact));
+  const sizes = groups.map((group) => measureShapeCard(group, children, collapsed, 0, compact, { sizes: customSizes, positions }));
   const columnGap = wholeSystem ? 60 : 80;
   const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(0, ...sizes.filter((_, index) => index % columns === column).map((size) => size.width)));
   const draw = (node, x, y, depth, parentId, size) => {
     const card = place(node, size.group ? 'shapeGroup' : 'shapeBlock', x, y, size.width, size.height,
-      { ...(parentId ? { parentId, extent: 'parent' } : {}), draggable: !parentId, zIndex: depth + 1 });
+      { ...(parentId ? { parentId } : {}), draggable: true, zIndex: depth + 1 });
     card.data = { ...card.data, depth, collapsed: collapsed.has(node.id), headerHeight: size.header,
-      index: groups.indexOf(node) + 1, nested: true, architecture: true, title: shapeCardTitle(node, depth), showDescription: size.description };
+      index: groups.indexOf(node) + 1, nested: true, architecture: true, title: shapeCardTitle(node, depth), showDescription: size.description, minimumWidth: size.minimumWidth, minimumHeight: size.minimumHeight, onResize };
     result.push(card);
     size.items.forEach((child, index) => {
       draw(child, size.slots[index].x, size.slots[index].y, depth + 1, node.id, size.sizes[index]);
@@ -168,18 +168,20 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
       sourceHandle = from.y < to.y ? 'out' : 'left-source';
       targetHandle = from.y < to.y ? 'right-target' : 'in';
     } else if (rowDetour) { sourceHandle = 'top-source'; targetHandle = 'top'; }
+    if (source === link.source && link.sourcePort) sourceHandle = { left: 'in', right: 'out', top: 'top', bottom: 'bottom' }[link.sourcePort];
+    if (target === link.target && link.targetPort) targetHandle = { left: 'in', right: 'out', top: 'top', bottom: 'bottom' }[link.targetPort];
     const label = wholeSystem && !detailedLinks && (columnDetour || rowDetour
       || !(groupIds.has(link.source) && groupIds.has(link.target))) ? undefined : link.label;
     edges.push({ id: link.id, source, target, sourceHandle, targetHandle,
       type: 'shapeConnection', label,
       markerEnd: { type: 'arrowclosed', color: '#8d8d99', width: 14, height: 14 }, zIndex: 100,
-      style: { stroke: '#8d8d99', strokeWidth: 1.3, ...(link.kind !== 'flow' ? { strokeDasharray: '4 4' } : {}),
+      style: { stroke: '#8d8d99', strokeWidth: 1.3, ...(link.kind !== 'flow' ? { strokeDasharray: ({ data: '4 4', dependency: '1 4', activation: '8 3 2 3' })[link.kind] } : {}),
         opacity: reading[source]?.active === false || reading[target]?.active === false ? .15 : .8 }, data: { link } });
   };
   (graph.links || []).forEach(addEdge);
   for (const node of nodes) if (node.workflow?.mode === 'sequence') {
     const items = children.get(node.id);
-    items.slice(1).forEach((child, index) => addEdge({ id: `sequence-${node.id}-${index}`, source: items[index].id, target: child.id, label: '다음', kind: 'flow' }));
+    items.slice(1).forEach((child, index) => addEdge({ id: `sequence-${node.id}-${index}`, source: items[index].id, target: child.id, label: '다음', kind: 'flow', workflowParentId: node.id }));
   }
   return { nodes: result, edges, root };
 }

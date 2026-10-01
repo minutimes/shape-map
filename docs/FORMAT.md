@@ -82,7 +82,12 @@ there is no separate child reference list.
 
 ## Non-authoritative view state
 
-`maps/<name>.view.json` may store node positions, collapsed IDs, and viewport. It
+`maps/<name>.view.json` may store node positions, collapsed IDs, and viewport.
+The product canvas also stores optional `shape.sizes` keyed by feature ID with
+`{width,height}` (168×72 to 30000×30000). Coordinates inside a section are relative
+to that section. A `null` entry in a shape position or size patch removes the
+override for undo; deleted feature entries are filtered. Sizes are spatial view
+state and never replace the canonical Mermaid hierarchy or feature meaning. It
 may also contain independent workflow navigation state:
 
 ```json

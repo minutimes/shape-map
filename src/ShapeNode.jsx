@@ -1,5 +1,5 @@
-import { memo } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { memo, useCallback, useRef } from 'react';
+import { Handle, Position, NodeResizer } from '@xyflow/react';
 
 export function ShapeIcon({ name, size = 18, ...props }) {
   const paths = {
@@ -27,6 +27,9 @@ export function ShapeIcon({ name, size = 18, ...props }) {
     menu: <path d="M4 6h16M4 12h16M4 18h16" />,
     minus: <path d="M5 12h14" />,
     help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 8a2.6 2.6 0 0 1 5 1c0 2-2.5 2-2.5 4m0 3h.01" /></>,
+    undo: <path d="M9 5 4 10l5 5m-5-5h10a6 6 0 0 1 0 12" />,
+    redo: <path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12" />,
+    trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name] || paths.box}</svg>;
 }
@@ -46,14 +49,14 @@ export function StateBadge({ status = 'neutral', compact = false }) {
 
 const executorLabel = { code: '코드', perception: '음성·문자 인식', llm: '추론·생성 모델', jev: '구조화 판단 모델', human: '사람' };
 function Ports({ vertical = false }) {
-  return <><Handle id="in" type="target" position={Position.Left} className="sm-handle" />
+  return <><Handle id="in" type="source" position={Position.Left} className="sm-handle" />
     <Handle id="out" type="source" position={vertical ? Position.Left : Position.Right} className="sm-handle" />
-    <Handle id="left-source" type="source" position={Position.Left} className="sm-handle" />
-    <Handle id="right-target" type="target" position={Position.Right} className="sm-handle" />
-    <Handle id="top" type="target" position={Position.Top} className="sm-handle" />
+    <Handle id="top" type="source" position={Position.Top} className="sm-handle" />
     <Handle id="bottom" type="source" position={Position.Bottom} className="sm-handle" />
-    <Handle id="top-source" type="source" position={Position.Top} className="sm-handle" />
-    <Handle id="bottom-target" type="target" position={Position.Bottom} className="sm-handle" /></>;
+    <Handle id="left-source" type="source" position={Position.Left} className="sm-handle sm-handle-alias" isConnectable={false} />
+    <Handle id="right-target" type="target" position={Position.Right} className="sm-handle sm-handle-alias" isConnectable={false} />
+    <Handle id="top-source" type="source" position={Position.Top} className="sm-handle sm-handle-alias" isConnectable={false} />
+    <Handle id="bottom-target" type="target" position={Position.Bottom} className="sm-handle sm-handle-alias" isConnectable={false} /></>;
 }
 
 function FeatureHints({ node, reading }) {
@@ -71,7 +74,7 @@ export const ShapeBlock = memo(function ShapeBlock({ data, selected }) {
       {state.commentCount > 0 && <span className="sm-block__comments" aria-label={`의견 ${state.commentCount}개`}><ShapeIcon name="comment" size={12} />{state.commentCount}</span>}
       <FeatureHints node={node} reading={data.reading} />
     </div>
-    <button className="sm-block__title nodrag" aria-label={node.label} title={node.label} onClick={(event) => { event.stopPropagation(); data.onOpen(node.id); }}>{data.title || node.label}</button>
+    <button className="sm-block__title" aria-label={node.label} title={node.label} onClick={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) return; event.stopPropagation(); data.onOpen(node.id); }}>{data.title || node.label}</button>
     {description && !data.architecture && <p className="sm-block__description">{description}</p>}
     {childCount > 0 && <button className="sm-block__deeper nodrag" aria-label={`${node.label} 내부 ${childCount}개 보기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><span>내부 {childCount}개</span><ShapeIcon name="chevron" size={11} /></button>}
   </div>;
@@ -79,12 +82,18 @@ export const ShapeBlock = memo(function ShapeBlock({ data, selected }) {
 
 export const ShapeGroup = memo(function ShapeGroup({ data, selected }) {
   const { node, state, index, childCount } = data;
+  const resize = useRef(data.onResize); resize.current = data.onResize;
+  // Stable listeners keep React Flow's active resize gesture alive while the
+  // controlled node dimensions update on every pointer movement.
+  const startResize = useCallback((_event, params) => resize.current?.(node.id, params, 'start'), [node.id]);
+  const finishResize = useCallback((_event, params) => resize.current?.(node.id, params, 'end'), [node.id]);
   return <div className={`sm-group sm-group--${state.status} sm-group--depth-${data.depth || 0}${data.architecture ? ' sm-architecture' : ''}${selected ? ' is-selected' : ''}${data.collapsed ? ' is-collapsed' : ''}`} data-testid={`shape-group-${node.id}`}>
+    {data.onResize && <NodeResizer isVisible={selected} minWidth={data.minimumWidth || 340} minHeight={data.minimumHeight || 100} onResizeStart={startResize} onResizeEnd={finishResize} />}
     <Ports />
     <div className="sm-group__header"><span className="sm-group__index">{data.depth ? `내부 ${childCount}개` : String(index).padStart(2, '0')}</span><StateBadge status={state.status} compact />{data.collapsed && !data.depth && <span className="sm-group__part-count">세부 영역 {childCount}개</span>}<FeatureHints node={node} reading={data.reading} />
       {childCount > 0 && <button className="sm-icon-button sm-group__fold nodrag" aria-label={`${node.label} ${data.collapsed ? '내부 펼치기' : '내부 접기'}`} aria-expanded={!data.collapsed} onClick={(event) => { event.stopPropagation(); data.onToggle(node.id); }}><ShapeIcon name={data.collapsed ? 'plus' : 'minus'} size={14} /></button>}
       <button className="sm-icon-button sm-group__focus nodrag" aria-label={`${node.label} 안으로 들어가기`} onClick={(event) => { event.stopPropagation(); data.onFocus(node.id); }}><ShapeIcon name="expand" size={14} /></button>
-    </div><button className="sm-group__title nodrag" aria-label={node.label} title={node.label} onClick={(event) => { event.stopPropagation(); data.onOpen(node.id); }}>{data.title || node.label}</button>
+    </div><button className="sm-group__title" aria-label={node.label} title={node.label} onClick={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) return; event.stopPropagation(); data.onOpen(node.id); }}>{data.title || node.label}</button>
     {data.showDescription && (node.block?.summary || node.task?.logic) ? <p className="sm-group__description">{node.block?.summary || node.task.logic}</p> : null}
     {!childCount && <p className="sm-group__empty">이 기능을 눌러 설명과 의견을 남겨 보세요.</p>}
   </div>;

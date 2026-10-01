@@ -47,13 +47,19 @@ Viewing a turn never restores it over the working graph.
 must differ. `kind` is `flow`, `data`, `dependency`, or `activation`. `label` is
 required (up to 180 characters); `condition` is optional (up to 4,000). Connection
 cycles are allowed without changing the single-parent hierarchy. Up to 4,000
-connections are supported. Duplicate IDs and unknown properties are rejected.
+connections are supported. Optional `sourcePort` and `targetPort` are `left`,
+`right`, `top`, or `bottom`; the canvas uses these saved endpoints when visible.
+Duplicate IDs and unknown properties are rejected.
 
 `%% sm-lens: JSON` defines a map-authored reading selector:
 
 ```json
 {"id":"format","label":"Video format","options":[{"id":"spoken","label":"Spoken video","description":"Features used for speech-led editing","roots":["speech","render"],"exclude":[],"custom":["speech"],"pending":[]}]}
 ```
+
+An optional lens `group` (up to 180 characters) groups related selectors in one
+menu without changing their IDs, scope, or intersection semantics. No default
+group is written for legacy maps.
 
 An option includes all descendants of its `roots`, subtracts `exclude` branches,
 and can mark `custom` branches as specific logic and `pending` branches as planned
@@ -82,9 +88,26 @@ as implementation changes. A change to the feature invalidates its prior review.
 
 ## API and AI use
 
-`GET /api/brief` returns `{text,mapPath,revision}`. The optional `?focus=NODE_ID`
-limits the brief to that feature and its descendants, retaining incident
-connections, saved parentage, human memos, and proposals. Unknown IDs are rejected.
+`GET /api/brief` returns `{text,mapPath,revision,targetCount,approved}`. Its optional
+`?focus=NODE_ID` limits the brief to a feature and descendants. Global briefs
+compare against the last recorded turn and include changed plans, new unresolved
+notes, changed fields, and added IDs. A focused brief also includes that branch's
+saved intent. The export references the canonical file instead of repeating tasks,
+connections, and selectors. At most 12 targets and two memo excerpts per target
+are expanded; remaining items stay in the source. Unknown IDs are rejected.
+
+`POST /api/brief` adds optional `focus`, `problem`, `purpose`, `successCriteria`
+(strings up to 4,000 characters each), and `approved` (boolean, default false).
+Approval requires a nonempty problem and criteria. Human-written request fields
+are exported in full. Generating a brief never mutates the map or calls a model.
+It directs the agent to use **기획문답 / decision-interview**, clarify ambiguous
+intent, agree on a final proposal, and implement after user approval. The portable
+[facilitation skill](../skills/shape-map-facilitation/SKILL.md) describes this workflow.
+
+Proposals support optional `purpose` and `successCriteria` alongside `reason`.
+These planning fields remain separate from executable task fields; applying a
+proposal does not put them into `task` or execute code.
+
 `GET /api/repository` returns
 real Git commits and the connected features inferred from their changed paths.
 External map workspaces require `SHAPE_MAP_REPOSITORY_ROOT` to connect Git.

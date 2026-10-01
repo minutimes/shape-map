@@ -19,6 +19,17 @@ async function fixture(options = {}) {
 afterEach(async () => { while (cleanups.length) await cleanups.pop()(); });
 
 describe('MapStore', () => {
+  it('saves section size and nested placement independently, reopens them and supports undo removal', async () => {
+    const { root, store, mapPath } = await fixture(); const before = store.getSnapshot(); const source = await fs.readFile(mapPath, 'utf8');
+    const updated = await store.updateView({ baseRevision: before.revision, clientId: 'studio', patch: { shape: { layoutVersion: 3, sizes: { planning: { width: 850, height: 480 } }, positions: { planning: { x: 320, y: 100 } } } } });
+    expect(updated.revision).toBe(before.revision); expect(await fs.readFile(mapPath, 'utf8')).toBe(source);
+    const reopened = await createMapStore({ projectRoot: root, mapPath: 'maps/demo.mmd', watchFiles: false });
+    expect(reopened.getSnapshot().view.shape).toEqual(updated.view.shape); await reopened.close();
+    await expect(store.updateView({ baseRevision: before.revision, clientId: 'invalid', patch: { shape: { sizes: { planning: { width: 10, height: 500 } } } } })).rejects.toMatchObject({ code: 'validation_error' });
+    expect(store.getSnapshot().view.shape.sizes).toEqual(updated.view.shape.sizes);
+    const undone = await store.updateView({ baseRevision: before.revision, clientId: 'undo', patch: { shape: { sizes: { planning: null }, positions: { planning: null } } } });
+    expect(undone.view.shape.sizes).toEqual({}); expect(undone.view.shape.positions).toEqual({});
+  });
   it('migrates a vertical composition view independently of the canonical map and other editor navigation', async () => {
     const { store, mapPath } = await fixture(); const before = store.getSnapshot(); const source = await fs.readFile(mapPath, 'utf8');
     await store.updateView({ baseRevision: before.revision, clientId: 'old', patch: {

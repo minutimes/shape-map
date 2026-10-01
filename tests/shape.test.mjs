@@ -173,7 +173,7 @@ describe('Shape collaboration backend', () => {
     const brief = (await request(app).get('/api/brief').expect(200)).body;
     expect(brief).toMatchObject({ mapPath: 'maps/demo.mmd', revision: snapshot.revision });
     expect(brief.text).toContain('[planning] 기획');
-    expect(brief.text).toContain('검토 필요: 결정 필요 (평일)');
+    expect(brief.text).toContain('사람 메모: 결정 필요');
 
     const view = (await request(app).put('/api/view').send({
       baseRevision: snapshot.revision, clientId: 'shape-canvas',
@@ -192,15 +192,29 @@ describe('Shape collaboration backend', () => {
     const app = createApiApp(store);
     const brief = (await request(app).get('/api/brief?focus=planning').expect(200)).body;
     expect(brief.revision).toBe(snapshot.revision);
-    expect(brief.text).toContain('논의할 기능: [planning]');
-    expect(brief.text).toContain('소속:');
-    expect(brief.text).toContain('개선 의견: 이 기능은 결과부터 보여 주세요. (사람)');
+    expect(brief.text).toContain('범위: [planning]');
+    expect(brief.text).not.toContain('기능 사이의 연결:');
+    expect(brief.text).toContain('사람 메모: 이 기능은 결과부터 보여 주세요.');
     expect(brief.text).toContain('구성을 읽기 어렵습니다.');
     expect(brief.text).toContain('기능 안의 카드를 가로로 보여줍니다.');
     expect(brief.text).not.toContain('다른 영역의 메모');
     expect(store.getSnapshot().revision).toBe(snapshot.revision);
     await request(app).get('/api/brief?focus=absent').expect(422);
     await request(app).get('/api/brief?focus=planning&focus=live').expect(422);
+  });
+
+  it('accepts a short Why/What request, requires explicit criteria before approval, and never mutates the map during export', async () => {
+    const { app, store } = await fixture(); const before = store.getSnapshot();
+    const intent = { focus: 'planning', problem: '기능을 못 찾는다', purpose: '구성을 이해한다', successCriteria: '필요한 기능을 한 번에 찾는다' };
+    const draft = (await request(app).post('/api/brief').send(intent).expect(200)).body;
+    expect(draft.text).toContain('문제: 기능을 못 찾는다'); expect(draft.text).toContain('아직 실행 승인 전'); expect(draft.approved).toBe(false);
+    const approved = (await request(app).post('/api/brief').send({ ...intent, approved: true }).expect(200)).body;
+    expect(approved.text).toContain('사용자가 위 요청을 승인했습니다'); expect(approved.approved).toBe(true);
+    await request(app).post('/api/brief').send({ approved: true }).expect(422);
+    await request(app).post('/api/brief').send({ ...intent, approved: 'yes' }).expect(422);
+    await request(app).post('/api/brief').send({ ...intent, problem: 'x'.repeat(4001) }).expect(422);
+    await request(app).post('/api/brief').send({ focus: 'absent' }).expect(422);
+    expect(store.getSnapshot().revision).toBe(before.revision); expect(store.getSnapshot().graph).toEqual(before.graph);
   });
 
   it('guards explicit form saves by semantic fingerprint while allowing unrelated fresh-CAS changes', async () => {

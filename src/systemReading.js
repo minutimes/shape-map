@@ -40,6 +40,8 @@ export function describeFeatureChange(before, after, beforeGraph, afterGraph) {
   for (const [key, label] of [['logic', '기능이 하는 일'], ['inputs', '들어오는 것'], ['outputs', '만들어지는 것'], ['ui', '사용자가 보는 결과'], ['condition', '사용하는 조건']]) compare(label, before.task?.[key], after.task?.[key]);
   compare('처리 담당', executor(before.task?.executor), executor(after.task?.executor));
   compare('다음 개선의 이유', before.proposal?.reason, after.proposal?.reason);
+  compare('개선 목적', before.proposal?.purpose, after.proposal?.purpose);
+  compare('해결 성공 기준', before.proposal?.successCriteria, after.proposal?.successCriteria);
   compare('개선 뒤의 동작', before.proposal?.logic, after.proposal?.logic);
   compare('내부 구성', beforeGraph.nodes.filter((node) => node.parentId === before.id).map((node) => node.label).join('\n'), afterGraph.nodes.filter((node) => node.parentId === after.id).map((node) => node.label).join('\n'));
   compare('다른 기능과의 연결', connections(beforeGraph, before.id), connections(afterGraph, after.id));

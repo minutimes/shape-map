@@ -75,7 +75,7 @@ Product connections and reading lenses also accept `upsertLink`, `removeLink`,
 - `patchNodeContent`: `{ "type", "id", "changes": [{ "path", "before", "after" }] }`.
   Both guards are required; `null` means the field or object is absent. Allowed
   paths are `label`; `section`; `task.logic|inputs|outputs|ui|condition|executor`;
-  `proposal.logic|inputs|outputs|ui|condition|executor|reason`; whole `proposal`;
+  `proposal.logic|inputs|outputs|ui|condition|executor|reason|purpose|successCriteria`; whole `proposal`;
   and whole `workflow`. `section` accepts `null` or `"reference"`. Whole proposal and workflow values are objects or `null`.
   Executor is one atomic object and cannot be patched by subfield. Duplicate,
   overlapping (for example `proposal` with `proposal.logic`), and unknown paths
@@ -94,7 +94,7 @@ Task and proposal text fields are limited to 4,000 characters, `model` to 160, a
 and effort on a non-LLM executor are rejected.
 
 Proposal uses canonical Mermaid metadata `%% mlc-proposal: ID|JSON`. It has the
-same fields as task plus optional `reason`; `{}` is valid and remains present.
+same fields as task plus optional `reason`, `purpose`, and `successCriteria`; `{}` is valid and remains present.
 Proposal metadata has no independent view semantics.
 
 A node with `section: "reference"` starts a reference area. The UI applies that
@@ -137,7 +137,7 @@ disk write, and SSE emission.
 `PUT /api/view` accepts `{ "clientId", "baseRevision", "patch" }`, where the
 patch may contain `positions`, `collapsedIds`, `viewport`,
 `workflow: { collapsedIds?, viewport? }`, or
-`shape: { layoutVersion?: 2, positions?, collapsedIds?, viewport? }`.
+`shape: { layoutVersion?: 2 | 3, positions?, sizes?, collapsedIds?, viewport? }`.
 It updates only the non-authoritative
 sibling `*.view.json`, merging position keys for stable IDs. Workflow navigation
 is merged at both nested levels and remains independent of the legacy flat
@@ -160,3 +160,22 @@ revision and do not change it.
 An external file change is parsed and Mermaid-validated before becoming a
 snapshot. Invalid source emits `source-error`; the last valid snapshot remains
 visible and the invalid file is never overwritten.
+
+## Compact AI discussion requests
+
+`GET /api/brief?focus=NODE_ID` references the map and returns the relevant changed
+intent and memo excerpts. `POST /api/brief` accepts:
+
+```json
+{"focus":"planning","problem":"People cannot find the right feature","purpose":"Understand the product","successCriteria":"Find the feature in one step","approved":false}
+```
+
+`focus` is optional; text fields are optional and at most 4,000 characters each.
+`approved` defaults to false and requires a nonempty problem and success criteria
+when true. The response is `{text,mapPath,revision,targetCount,approved}`.
+This read-only export performs no model call, map mutation, or implementation.
+See the [facilitation workflow](../skills/shape-map-facilitation/SKILL.md).
+
+`PUT /api/view` also accepts `patch.shape.sizes` keyed by existing IDs with finite
+`{width,height}` in the 168×72 to 30000×30000 range. `null` removes a shape position
+or size override. Spatial changes preserve the source revision and `.mmd` bytes.

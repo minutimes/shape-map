@@ -17,7 +17,7 @@ describe('three projections of one product map', () => {
     const graph = fixture(); const before = structuredClone(graph);
     const system = shapeLayout(graph, { collapsedIds: [] });
     expect(system.nodes.filter((node) => node.type === 'shapeGroup').map((node) => node.id)).toEqual(['map', 'canvas', 'discussion']);
-    expect(system.nodes.find((node) => node.id === 'canvas')).toMatchObject({ parentId: 'map', extent: 'parent' });
+    expect(system.nodes.find((node) => node.id === 'canvas')).toMatchObject({ parentId: 'map', draggable: true });
     expect(system.nodes.find((node) => node.id === 'deep').parentId).toBe('canvas');
     expect(shapeLayout(graph, { focusId: 'canvas' }).nodes.map((node) => node.id)).toEqual(['deep']);
     expect(graph).toEqual(before);
@@ -96,5 +96,12 @@ describe('three projections of one product map', () => {
     const turn = { nodes: fixture().nodes, categories: [], title: '첫 기록', number: 1 };
     expect(turnGraph(turn)).not.toHaveProperty('turns');
     expect(turnGraph(turn).nodes).toBe(turn.nodes);
+  });
+  it('identifies automatic sequence lines by their owning section so they edit that section', () => {
+    const graph = fixture(); graph.nodes.find((node) => node.id === 'map').workflow = { mode: 'sequence' };
+    graph.nodes.push({ id: 'next', label: '다음 기능', parentId: 'map' });
+    const result = shapeLayout(graph, { focusId: 'map', collapsedIds: [], detailedLinks: true });
+    expect(result.edges.find((edge) => edge.id === 'sequence-map-0')?.data.link).toMatchObject({ source: 'canvas', target: 'next', workflowParentId: 'map' });
+    expect(graph.links).toBeUndefined();
   });
 });

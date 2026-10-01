@@ -7,36 +7,47 @@ software without reading all of its code. It turns a product into a navigable
 diagram: what each feature does, where it belongs, what changed, and what to
 improve next. The interface is Korean-first.
 
-![Shape map product workspace](docs/shape-map/desktop.jpg)
+![Shape map product workspace](docs/shape-map/studio.png)
 
-## One product, three ways to read it
+## One canvas, a nested product
 
-- **Function hierarchy** — follow a feature from its parent into its parts.
-- **System composition** — see the features grouped into product areas.
-- **Product shape** — read each feature through its user experience and result.
+Function hierarchy, system composition, and product shape are read together.
+The left **레이어** panel mirrors the actual feature tree: fold a branch, find a
+feature by name or ID, and select it to open its attached detail card. Hide the
+panel to use the full canvas. Top-level section titles stay readable when zoomed
+out. The toolbar is compact; recorded turns open only when requested. Narrow
+windows adapt the controls while retaining the same canvas arrangement and positions.
 
-Composition cards can contain more cards at any depth. Expand them in place;
-click a card to read its details. Recorded arrows show processing, data transfer,
-dependencies, and model roles. Connections can be inspected and edited in the
-feature's **연결** tab. Reading selectors come from the map itself: video formats,
-model roles, and custom logic can be described without hardcoding a product's
-rules into the application. Selections explain the saved design and do not
-change the running product's configuration.
+Cards can contain more cards at any depth. Click a card to read its role, notes,
+proposal, attributes, connections, and recorded changes. Its stable ID has a copy
+button. **구성·변경 설명** provides a plain-language explanation of the current
+scope. Connected source files lead to actual Git changes.
 
-Connections use separate ports and routing lanes, reserving space for their
-explanations. Routes update when cards move or unfold. **지도 화면에 맞추기**
-includes the arrows and their labels as well as the cards.
+Right-click blank space to create a block or section, or use the bottom tools.
+Right-click a block to rename, change attributes, copy, duplicate, or delete it.
+Drag a block into a section to change its saved parent. Selected sections have
+resize handles. Drops clear sibling cards; containers grow to hold their contents.
+Pull a connection from any of four sides; click its line or label to edit the
+explanation, condition, or relationship. **연결선** controls detail and model links.
 
-**전체 구성** returns from a focused feature to the complete system. The scope
-bar distinguishes the whole product from the area currently on screen.
-**구성·변경 설명** explains that area's role, its nested parts, recorded changes,
-and saved improvement plans. Every card also has a **변경 기록** tab with actual
-before/after text, composition, and connections—even while it has a red proposal.
-Connected source files lead to the corresponding Git changes.
+| Shortcut | Action |
+| --- | --- |
+| Ctrl/⌘ + wheel | Zoom the canvas; plain wheel pans |
+| Ctrl/⌘ + C / V / D | Copy / paste / duplicate selected branches |
+| Delete / Backspace | Delete selected blocks and their contents |
+| Ctrl/⌘ + Z / Shift + Z | Undo / redo local editing |
+| Shift drag or Ctrl/⌘ click | Select multiple blocks |
+| / | Open feature search |
 
-![Read a system's composition and changes](docs/shape-map/system-reading.jpg)
+Text fields retain their normal editing shortcuts. Undo history lasts for the
+current session; a semantic edit by another client clears it to protect that
+client's work. Deletion undo restores IDs, children, connections, and attributes.
+Copies get fresh IDs and do not inherit human review. Turn records are immutable.
 
-![Nested feature composition](docs/shape-map/nested-cards.jpg)
+Reading selectors and attributes come from the map itself. They can describe
+video formats, model roles, and custom logic without hardcoded product rules.
+An optional map-authored `group` puts related selectors in one menu. Filters
+explain saved design; they do not change the running product's configuration.
 
 The infinite canvas uses a quiet monochrome palette. Color carries meaning:
 
@@ -73,18 +84,24 @@ npm run status:local
 
 ## Work with an AI
 
-1. Click a feature. Leave a note, a concern, or a proposed change.
-2. Click a card to open its attached editor, write a memo or proposal, and save it.
-   Use **AI에 전달** for that feature and its parts, or **AI와 논의** for the whole
-   map, to copy or save a readable discussion brief.
-3. Give the brief and map to your coding agent. The agent can edit the shared
-   Mermaid file or use the revision-checked local API.
-4. Watch the open canvas update. Inspect the implementation, confirm features
-   you have reviewed, and record a turn with the reason for the changes.
+1. Leave notes and proposed changes on the relevant feature IDs.
+2. Choose **AI에 전달** for that feature and its parts, or **AI와 논의** for the map.
+   Write the problem, purpose, and observable success criteria. The export refers
+   to the canonical file and includes changed plans and new unresolved notes;
+   it does not repeat the whole map or dictate implementation steps.
+3. Give this request and the map to your coding agent. Use the **기획문답**
+   (`decision-interview`) skill to clarify only intent that cannot be found in
+   the evidence. Confirm a final proposal; after approval, the agent implements
+   and verifies it. A [portable facilitation skill](skills/shape-map-facilitation/SKILL.md)
+   is included for agents without the user's installed skill.
+4. Inspect the implementation, confirm features you have actually reviewed, and
+   record a turn. The service never treats exporting a request as implementation.
 
-This release works with the AI you already use. The discussion brief is an
-actual export of your map and unresolved comments. Model calls, email delivery,
-and automatic execution are not connected in this release.
+The request starts unapproved. The optional approval checkbox is enabled only
+with a problem and success criteria, and resets when the request changes. Source
+references remain complete; excerpts of saved map notes are bounded. User-written
+problem, purpose, and criteria are preserved in full. This release exports to
+the AI you already use; provider calls and email delivery are separate future work.
 
 Feature comments and proposals are persisted alongside the diagram. Drafts stay
 in the browser while you type. If a person and an AI edit the same feature,
@@ -104,7 +121,7 @@ npm run dev
 The map must use the supported Mermaid subset. The main file is authoritative
 for structure, connections, reading conditions, descriptions, proposals,
 comments, and turns. Its `.view.json`
-companion stores canvas position, viewport, and fold state only. Each feature
+companion stores canvas position, section size, viewport, and fold state only. Each feature
 can list related source paths; the repository history panel connects actual
 changed files to those features. A code commit is distinct from a product turn
 and from human review.
@@ -119,7 +136,7 @@ npm test
 npm run build
 ```
 
-The detailed hierarchy editor is available through **세부 편집** or `?editor=1`.
+The detailed hierarchy editor is available through **원본·고급 편집** or `?editor=1`.
 It retains inline editing, keyboard shortcuts, branch reparenting, undo/redo,
 optional execution metadata, and reference sections.
 
