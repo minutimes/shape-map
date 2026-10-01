@@ -25,7 +25,7 @@ describe('three projections of one product map', () => {
   it('starts with a readable whole-system overview and opens deeper parts on entering an area', () => {
     const graph = fixture();
     expect(shapeLayout(graph).nodes.some((node) => node.id === 'deep')).toBe(false);
-    expect(shapeLayout(graph).nodes.find((node) => node.id === 'map').data.collapsed).toBe(true);
+    expect(shapeLayout(graph).nodes.find((node) => node.id === 'map').data.collapsed).toBe(false);
     expect(shapeLayout(graph, { focusId: 'map' }).nodes.some((node) => node.id === 'deep')).toBe(true);
   });
   it('uses the same IDs and actual parent edges for hierarchy and experience views', () => {
@@ -37,9 +37,8 @@ describe('three projections of one product map', () => {
     expect(compact.nodes.find((node) => node.id === 'map').style.width).toBe(340);
     expect(compact.nodes.find((node) => node.id === 'discussion').position.x).toBe(0);
     const tablet = shapeLayout(graph, { singleColumn: true });
-    expect(tablet.nodes.find((node) => node.id === 'map').style.width).toBe(650);
-    expect(tablet.nodes.find((node) => node.id === 'discussion').position.x).toBe(0);
-    expect(tablet.nodes.find((node) => node.id === 'discussion').position.y).toBeGreaterThan(tablet.nodes.find((node) => node.id === 'map').style.height);
+    expect(tablet.nodes.find((node) => node.id === 'discussion').position.x).toBeGreaterThan(tablet.nodes.find((node) => node.id === 'map').style.width);
+    expect(tablet.nodes.find((node) => node.id === 'discussion').position.y).toBe(0);
     const mobileHierarchy = shapeLayout(graph, { mode: 'function', compact: true });
     expect(mobileHierarchy.nodes.every((node) => node.position.x + node.style.width <= 340)).toBe(true);
     expect(mobileHierarchy.edges.map((edge) => edge.target)).toEqual(['map', 'discussion']);
@@ -61,7 +60,7 @@ describe('three projections of one product map', () => {
     expect(folded.nodes.some((node) => node.id === 'deep')).toBe(false);
     expect(folded.edges[0]).toMatchObject({ source: 'note', target: 'canvas' });
     expect(shapeLayout(graph, { focusId: 'map' }).edges).toEqual([]);
-    expect(shapeLayout(graph, { detailedLinks: true }).edges[0]).toMatchObject({ source: 'discussion', target: 'map' });
+    expect(shapeLayout(graph, { detailedLinks: true }).edges[0]).toMatchObject({ source: 'note', target: 'canvas' });
   });
   it('keeps area handoffs readable and exposes smaller data connections on demand', () => {
     const graph = fixture();
@@ -75,7 +74,7 @@ describe('three projections of one product map', () => {
     expect(overview.edges[0]).toMatchObject({ source: 'map', target: 'discussion', sourceHandle: 'out', targetHandle: 'in' });
     expect(overview.edges[1]).toMatchObject({ sourceHandle: 'left-source', targetHandle: 'right-target' });
     expect(shapeLayout(graph, { detailedLinks: true }).edges.map((edge) => edge.id)).toContain('detail');
-    const vertical = shapeLayout(graph, { singleColumn: true });
+    const vertical = shapeLayout(graph, { compact: true });
     expect(vertical.edges[1]).toMatchObject({ sourceHandle: 'top-source', targetHandle: 'bottom-target' });
   });
   it('routes a connection around an intervening area instead of through its text', () => {
@@ -85,7 +84,7 @@ describe('three projections of one product map', () => {
       { id: 'skip', source: 'map', target: 'middle', kind: 'flow', label: '다른 제작 경로' },
       { id: 'back', source: 'middle', target: 'map', kind: 'dependency', label: '공통 기준' },
     ];
-    const vertical = shapeLayout(graph, { singleColumn: true });
+    const vertical = shapeLayout(graph, { compact: true });
     expect(vertical.edges[0]).toMatchObject({ sourceHandle: 'out', targetHandle: 'right-target' });
     expect(vertical.edges[1]).toMatchObject({ sourceHandle: 'left-source', targetHandle: 'in' });
     const horizontal = shapeLayout(graph, { availableWidth: 1500 });

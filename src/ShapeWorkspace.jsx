@@ -9,6 +9,7 @@ import { ShapeConnection } from './ShapeEdge.jsx';
 import { routeShapeEdges, shapeCanvasBounds } from './shapeRouting.js';
 import { blockDraftValues, BLOCK_DRAFT_FIELDS, draftConflicts, reconcileDraft } from './shapeDraft.js';
 import CanvasOverview from './CanvasNavigation.jsx';
+import ShapeInspectorAnchor from './ShapeInspectorAnchor.jsx';
 import ScopeReader, { FeatureHistory } from './ScopeReader.jsx';
 import { areaReading, featureHistory } from './systemReading.js';
 import './shapeWorkspace.css';
@@ -51,8 +52,11 @@ function Dialog({ title, subtitle, children, onClose, wide = false }) {
 const LINK_KINDS = { flow: '처리 순서', data: '자료 전달', dependency: '필요한 기능', activation: '모델 역할' };
 const EXECUTORS = { code: '코드로 처리', perception: '음성·문자 인식', llm: '추론·생성 모델', jev: '구조화 판단 모델', human: '사람이 판단' };
 
-function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, mapPath, send, busy, onClose, onOpen, onRepository }) {
+function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, mapPath, send, busy, onClose, onOpen, onRepository, onBrief }) {
   const [tab, setTab] = useState('overview');
+  const inspectorRef = useRef(null);
+  const returnFocus = useRef(document.activeElement);
+  useEffect(() => { inspectorRef.current?.focus(); return () => { if (returnFocus.current?.isConnected) returnFocus.current.focus?.(); }; }, []);
   const draftKey = `shape-map:draft:${mapPath}:${node.id}`;
   const initial = blockDraftValues(node);
   const restored = useRef(readOnly ? null : localDraft(draftKey, null));
@@ -102,11 +106,11 @@ function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, map
   const children = graph.nodes.filter((item) => item.parentId === node.id && item.section !== 'reference');
   const links = (graph.links || []).filter((link) => link.source === node.id || link.target === node.id);
   const records = featureHistory(turns, node.id);
-  return <aside className="sm-inspector" aria-label="기능 블록 상세" data-testid="shape-inspector">
+  return <aside ref={inspectorRef} className="sm-inspector" role="dialog" aria-modal="false" aria-labelledby="sm-inspector-title" tabIndex={-1} data-testid="shape-inspector" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } }}>
     <header className="sm-inspector__heading"><span className="sm-eyebrow">기능 블록</span><button className="sm-icon-button" aria-label="기능 상세 닫기" onClick={onClose}><ShapeIcon name="close" /></button></header>
-    <h2>{node.label}</h2><StateBadge status={state.status} />
+    <h2 id="sm-inspector-title">{node.label}</h2><StateBadge status={state.status} />
     <div className="sm-inspector-tabs" role="tablist" aria-label="기능 정보">
-      {[['overview', '개요'], ['links', `연결${links.length ? ` ${links.length}` : ''}`], ['history', '변경 기록'], ['comments', `의견${comments.length ? ` ${comments.length}` : ''}`], ['proposal', '다음 변경안']].map(([id, label]) =>
+      {[['overview', '개요'], ['links', `연결${links.length ? ` ${links.length}` : ''}`], ['history', '변경 기록'], ['comments', `메모${comments.length ? ` ${comments.length}` : ''}`], ['proposal', '다음 변경안']].map(([id, label]) =>
         <button key={id} role="tab" aria-selected={tab === id} aria-controls={`sm-inspector-panel-${id}`} onClick={() => setTab(id)}>{label}</button>)}
     </div>
     <div className="sm-inspector__body" role="tabpanel" id={`sm-inspector-panel-${tab}`}>
@@ -184,7 +188,7 @@ function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, map
         </form>}
       </>}
     </div>
-    <footer className="sm-inspector__footer"><ShapeIcon name="box" size={13} /><span>{shapeAncestors(graph, node.id).slice(0, -1).map((item) => item.label).join(' / ') || '제품 전체'}</span></footer>
+    <footer className="sm-inspector__footer"><ShapeIcon name="box" size={13} /><span>{shapeAncestors(graph, node.id).slice(0, -1).map((item) => item.label).join(' / ') || '제품 전체'}</span><button onClick={onBrief}><ShapeIcon name="mail" size={13} />AI에 전달</button></footer>
     {reviewing && <Dialog title="이 기능을 직접 확인했나요?" subtitle="초록색은 사람이 확인한 기능에만 표시됩니다." onClose={() => setReviewing(false)}>
       <p className="sm-dialog-copy">“{node.label}”의 설명과 실제 동작이 맞는지 확인한 뒤 표시해 주세요.</p><div className="sm-form-actions"><button className="sm-button" onClick={() => setReviewing(false)}>돌아가기</button><button className="sm-button sm-button--verified" disabled={busy} onClick={async () => { if (await send({ type: 'setBlock', id: node.id, block: { status: 'verified' } })) setReviewing(false); }}><ShapeIcon name="check" size={15} />직접 확인했습니다</button></div>
     </Dialog>}
@@ -208,6 +212,8 @@ export default function ShapeWorkspace() {
   const [filter, setFilter] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [brief, setBrief] = useState(null);
+  const [briefFocusId, setBriefFocusId] = useState(null);
+  const [expandedCanvas, setExpandedCanvas] = useState(false);
   const [repository, setRepository] = useState(null);
   const [repositoryScopeId, setRepositoryScopeId] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -330,10 +336,10 @@ export default function ShapeWorkspace() {
   const fitDiagram = useCallback(() => {
     const bounds = shapeCanvasBounds(diagramGeometry.current.nodes, diagramGeometry.current.edges);
     const canvas = canvasRef.current;
-    if (bounds && canvas) flow.setViewport(getViewportForBounds(bounds, canvas.clientWidth, canvas.clientHeight, .2, 1.15,
+    if (bounds && canvas) flow.setViewport(getViewportForBounds(bounds, canvas.clientWidth, canvas.clientHeight, .06, 1.15,
       { left: '4%', right: '4%', top: '24px', bottom: '52px' }));
   }, [flow]);
-  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}:${detailedLinks}:${showActivation}:${windowWidth}:${windowHeight}`;
+  const layoutKey = `${snapshot?.mapPath}:${turnId || 'current'}:${currentFocus?.id}:${mode}:${compact}:${singleColumn}:${detailedLinks}:${showActivation}:${windowWidth}:${windowHeight}:${expandedCanvas}:${collapsedIds?.join(',') || 'default'}`;
   const overviewNodes = useMemo(() => nodes.map((node) => {
     return { ...node, position: absoluteShapePosition(nodes, node.id),
       data: { ...node.data, label: node.data.node.label, parentId: node.data.node.parentId,
@@ -343,7 +349,7 @@ export default function ShapeWorkspace() {
   useEffect(() => {
     if (!snapshot || restoredMap.current === snapshot.mapPath) return;
     restoredMap.current = snapshot.mapPath;
-    if (!focusId && snapshot.view?.shape?.layoutVersion === 2) {
+    if (!focusId && snapshot.view?.shape?.layoutVersion === 3) {
       setViewPositions(snapshot.view.shape.positions || {});
       setCollapsedIds(snapshot.view.shape.collapsedIds || null);
     }
@@ -352,7 +358,7 @@ export default function ShapeWorkspace() {
     if (!graph) return;
     const timer = setTimeout(() => {
       const view = snapshotRef.current?.view?.shape;
-      const saved = view?.layoutVersion === 2 && !focusId && !singleColumn && !turnId && !detailedLinks && !showActivation && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
+      const saved = view?.layoutVersion === 3 && !focusId && !singleColumn && !expandedCanvas && !turnId && !detailedLinks && !showActivation && mode === 'system' && currentFocus?.id === root?.id ? view.viewport : null;
       if (compact || (singleColumn && mode !== 'function')) {
         const bounds = shapeCanvasBounds(diagramGeometry.current.nodes, diagramGeometry.current.edges);
         const canvasWidth = canvasRef.current?.clientWidth || window.innerWidth;
@@ -362,8 +368,8 @@ export default function ShapeWorkspace() {
         }
       }
       else if (saved) flow.setViewport(saved);
-      else if (mode === 'function' || currentFocus?.id === root?.id) fitDiagram();
-      else flow.setViewport({ x: 28, y: 28, zoom: .9 });
+      else if (currentFocus?.id === root?.id || mode === 'function' || expandedCanvas) fitDiagram();
+      else flow.setViewport({ x: 28, y: 28, zoom: .8 });
     }, 80);
     return () => clearTimeout(timer);
   }, [layoutKey, Boolean(graph), fitDiagram]);
@@ -383,22 +389,23 @@ export default function ShapeWorkspace() {
       if (dialog || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName) || event.target.isContentEditable) return;
       const command = event.metaKey || event.ctrlKey;
       if (command && ['+', '=', '-'].includes(event.key)) { event.preventDefault(); event.key === '-' ? flow.zoomOut() : flow.zoomIn(); }
-      if (command && event.key === '0') { event.preventDefault(); flow.fitView({ padding: .09, maxZoom: 1.15, duration: 0 }); }
-      if (event.key === 'Escape') { setSelectedId(null); setFilter(null); setSidebarOpen(false); }
+      if (command && event.key === '0') { event.preventDefault(); fitDiagram(); }
+      if (event.key === 'Escape') { setSelectedId(null); setFilter(null); setSidebarOpen(false); setExpandedCanvas(false); }
     };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
-  }, [flow, dialog]);
+  }, [flow, dialog, fitDiagram]);
   async function persistView(patch) {
     if (turnId || !snapshotRef.current?.sourceStatus.valid) return;
     try {
-      const next = await saveView({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, patch: { shape: { layoutVersion: 2, ...patch } } });
+      const next = await saveView({ baseRevision: snapshotRef.current.revision, clientId: clientId.current, patch: { shape: { layoutVersion: 3, ...patch } } });
       // A view save must not replace newer semantic edits delivered by SSE.
       if (next.revision === snapshotRef.current.revision) accept(next);
     } catch { /* Navigation remains usable; semantic drafts are saved separately. */ }
   }
-  async function openBrief() {
+  async function openBrief(id) {
+    const focus = typeof id === 'string' ? id : null; setBriefFocusId(focus);
     setDialog('brief'); setBrief(null); setCopied(false);
-    try { const response = await fetch('/api/brief'); if (!response.ok) throw new Error(); const body = await response.json(); setBrief(body.text); }
+    try { const response = await fetch(focus ? `/api/brief?focus=${encodeURIComponent(focus)}` : '/api/brief'); if (!response.ok) throw new Error(); const body = await response.json(); setBrief(body.text); }
     catch { setBrief('논의 내용을 불러오지 못했습니다. 연결을 확인한 뒤 다시 열어 주세요.'); }
   }
   async function openRepository(id) {
@@ -459,7 +466,7 @@ export default function ShapeWorkspace() {
         </>}
         <div className="sm-sidebar__bottom"><button onClick={openRepository}><ShapeIcon name="history" size={14} />레포 변경 기록<ShapeIcon name="arrow" size={13} /></button><span className="sm-local-file"><ShapeIcon name="code" size={14} />{snapshot.mapPath.split('/').at(-1)}</span><button onClick={() => setDialog('help')}><ShapeIcon name="help" size={14} />지도 읽는 법<ShapeIcon name="arrow" size={13} /></button></div>
       </aside>
-      <section className="sm-stage" aria-label="무한 캔버스 제품 지도">
+      <section aria-label="무한 캔버스 제품 지도" className={`sm-stage${expandedCanvas ? ' is-expanded' : ''}`}>
         <div className="sm-stage-heading"><div className="sm-stage-heading__title"><button className="sm-icon-button sm-mobile-menu" aria-label="제품 탐색 열기" onClick={() => setSidebarOpen(true)}><ShapeIcon name="menu" /></button><div><nav className="sm-breadcrumb" aria-label="지도 경로">{shapeAncestors(graph, currentFocus.id).map((node, itemIndex) => <span key={node.id}>{itemIndex > 0 && <ShapeIcon name="chevron" size={10} />}<button onClick={() => focusNode(node.id)} aria-current={node.id === currentFocus.id ? 'location' : undefined}>{itemIndex === 0 ? '제품 전체' : node.label}</button></span>)}</nav><h1>{currentFocus.label}<span>{SHAPE_VIEWS.find((view) => view.id === mode).label}</span></h1></div></div><button className="sm-button" disabled={Boolean(turnId) || busy} onClick={() => openCreate('block')}><ShapeIcon name="plus" size={15} /><span>기능 추가</span></button></div>
         <div className="sm-area-reading" aria-label="전체 시스템과 현재 영역">
           <button className="sm-area-home" onClick={() => focusNode(root.id)}><ShapeIcon name="grid" size={14} />전체 구성</button>
@@ -476,7 +483,7 @@ export default function ShapeWorkspace() {
         </div>
         {(graph.lenses || []).some((lens) => lensSelections[lens.id]) && <div className="sm-lens-description" role="status"><ShapeIcon name="branch" size={13} /><span>{graph.lenses.map((lens) => lens.options.find((option) => option.id === lensSelections[lens.id])?.description).filter(Boolean).join(' · ')}<small>지도에 기록된 관련 기능을 강조합니다.</small></span><button onClick={() => setLensSelections({})}>선택 해제</button></div>}
         <div className="sm-canvas" data-testid="shape-canvas" ref={canvasRef}>
-          <ReactFlow nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={.2} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch zoomActivationKeyCode="Meta" panOnDrag selectionOnDrag={false} nodesConnectable={false} deleteKeyCode={null} colorMode="light"
+          <ReactFlow nodes={nodes} edges={canvasEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={.06} maxZoom={2} panOnScroll zoomOnScroll={false} zoomOnPinch zoomActivationKeyCode="Meta" panOnDrag selectionOnDrag={false} nodesConnectable={false} deleteKeyCode={null} colorMode="light"
             onNodesChange={(changes) => setNodes((current) => applyNodeChanges(changes, current))}
             onNodeClick={(_event, node) => openNode(node.id)} onPaneClick={() => setSelectedId(null)}
             onNodeDragStop={(_event, node) => {
@@ -485,16 +492,16 @@ export default function ShapeWorkspace() {
             }}
             onMove={(_event, viewport) => setZoom(viewport.zoom)}
             onMoveEnd={(_event, viewport) => {
-              if (singleColumn || turnId || mode !== 'system' || currentFocus.id !== root.id) return;
+              if (singleColumn || expandedCanvas || turnId || mode !== 'system' || currentFocus.id !== root.id) return;
               clearTimeout(viewTimer.current); viewTimer.current = setTimeout(() => persistView({ viewport }), 450);
             }}
             fitViewOptions={{ padding: .09, maxZoom: 1.15 }}>
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d7d7dc" />
-            <CanvasOverview nodes={overviewNodes} selectedId={selectedId} canvasRef={canvasRef} busy={busy} onNavigate={(id) => openNode(id)} actionLabel="상세 보기" />
+            {mode === 'function' && <CanvasOverview nodes={overviewNodes} selectedId={selectedId} canvasRef={canvasRef} busy={busy} onNavigate={(id) => openNode(id)} actionLabel="상세 보기" />}
             {minimap && <MiniMap pannable zoomable nodeColor={(node) => ({ planned: '#e36a69', verified: '#6baf86', changed: '#719ddc', concern: '#d3af5a' }[node.data.state?.status] || '#dedee2')} />}
           </ReactFlow>
           {selectedTurn && <div className="sm-replay-badge"><ShapeIcon name="history" size={14} />턴 {selectedTurn.number} · {selectedTurn.title}<button onClick={() => chooseTurn(null)}>현재로 돌아가기<ShapeIcon name="arrow" size={13} /></button></div>}
-          <div className="sm-canvas-bottom"><span className="sm-canvas-tip">{mode === 'function' ? '선은 기능의 소속을 나타냅니다' : '카드 안은 소속 · 화살표는 연결 · +로 내부 펼치기'}</span><div className="sm-zoom"><button aria-label="지도 축소" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="minus" size={14} /></button><button className="sm-zoom-value" aria-label="지도 100%로 보기" onClick={() => flow.zoomTo(1)}>{Math.round(zoom * 100)}%</button><button aria-label="지도 확대" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="plus" size={14} /></button><span /><button aria-label="지도 화면에 맞추기" onClick={fitDiagram}><ShapeIcon name="expand" size={14} /></button><button aria-label="미니맵 보기" aria-pressed={minimap} onClick={() => setMinimap(!minimap)}><ShapeIcon name="grid" size={14} /></button></div></div>
+          <div className="sm-canvas-bottom"><span className="sm-canvas-tip">{mode === 'function' ? '선은 기능의 소속을 나타냅니다' : '카드 안은 소속 · 화살표는 연결 · +로 내부 펼치기'}</span><div className="sm-zoom"><button aria-label="지도 축소" onClick={() => flow.zoomOut({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="minus" size={14} /></button><button className="sm-zoom-value" aria-label="지도 100%로 보기" onClick={() => flow.zoomTo(1)}>{Math.round(zoom * 100)}%</button><button aria-label="지도 확대" onClick={() => flow.zoomIn({ duration: reducedMotion() ? 0 : 140 })}><ShapeIcon name="plus" size={14} /></button><span /><button aria-label="지도 화면에 맞추기" onClick={fitDiagram}><ShapeIcon name="expand" size={14} /></button><button aria-label={expandedCanvas ? '지도 크게 보기 닫기' : '지도 크게 보기'} aria-pressed={expandedCanvas} onClick={() => setExpandedCanvas(!expandedCanvas)}><ShapeIcon name={expandedCanvas ? 'close' : 'screen'} size={14} /></button><button aria-label="미니맵 보기" aria-pressed={minimap} onClick={() => setMinimap(!minimap)}><ShapeIcon name="grid" size={14} /></button></div></div>
         </div>
         <footer className="sm-timeline" aria-label="개발 턴 타임라인">
           <div className="sm-timeline__heading"><div><ShapeIcon name="history" size={16} /><strong>{selectedTurn ? `턴 ${selectedTurn.number}` : '현재 형상'}</strong><span>{selectedTurn ? selectedTurn.summary || selectedTurn.title : turns.length ? '지난 개선을 돌아보고, 다음 변화를 계획하세요.' : '첫 형상을 기록하면 개발 과정을 되짚을 수 있습니다.'}</span></div>{previousTurn && <button className="sm-turn-diff" onClick={() => setDialog('changes')}>변경 {diff.changedIds.length} · 추가 {diff.addedIds.length} · 제거 {diff.removedIds.length}</button>}<button className="sm-button sm-button--small" disabled={Boolean(turnId) || busy} onClick={() => openCreate('turn')}><ShapeIcon name="plus" size={13} />턴 기록</button></div>
@@ -503,8 +510,8 @@ export default function ShapeWorkspace() {
           </div>
           {turns.length > 0 && <label className="sm-timeline-slider"><span className="sm-sr-only">보고 있는 개발 턴</span><input type="range" min="0" max={turns.length} value={index} onChange={(event) => chooseTurn(turns[Number(event.target.value)]?.id || null)} aria-valuetext={selectedTurn ? `턴 ${selectedTurn.number}: ${selectedTurn.title}` : '현재 형상'} /></label>}
         </footer>
+        {selected && <ShapeInspectorAnchor nodes={nodes} selectedId={selected.id} anchorId={shapeAncestors(graph, selected.id).reverse().find((item) => nodes.some((node) => node.id === item.id))?.id} canvasRef={canvasRef}><BlockInspector key={`${turnId || 'current'}:${selected.id}`} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={openNode} onRepository={openRepository} onBrief={() => openBrief(selected.id)} /></ShapeInspectorAnchor>}
       </section>
-      {selected && <BlockInspector key={`${turnId || 'current'}:${selected.id}`} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={openNode} onRepository={openRepository} />}
     </div>
     {toast && <div className={`sm-toast${toast.error ? ' is-error' : ''}`} role={toast.error ? 'alert' : 'status'}>{!toast.error && <ShapeIcon name="check" size={15} />}<span>{toast.text}</span><button className="sm-icon-button" aria-label="알림 닫기" onClick={() => setToast(null)}><ShapeIcon name="close" size={14} /></button></div>}
     {dialog === 'reading' && <Dialog wide title={currentFocus.id === root.id ? '전체 시스템의 구성과 개선' : `${currentFocus.label} · 구성과 개선`} subtitle="큰 기능의 역할부터 세부 구성, 지난 변경, 다음 개선까지 읽습니다." onClose={() => setDialog(null)}>
@@ -517,7 +524,7 @@ export default function ShapeWorkspace() {
         <div className="sm-form-actions"><button className="sm-button" type="button" onClick={() => setDialog(null)}>돌아가기</button><button className="sm-button sm-button--dark" disabled={busy || !newTitle.trim()}><ShapeIcon name={dialog === 'turn' ? 'history' : 'plus'} size={15} />{dialog === 'turn' ? '이 형상 기록' : '기능 추가'}</button></div>
       </form>
     </Dialog>}
-    {dialog === 'brief' && <Dialog wide title="이 지도로 AI와 논의하기" subtitle="기능별 의견과 변경안을 지금 사용하는 AI에게 건네세요." onClose={() => setDialog(null)}>
+    {dialog === 'brief' && <Dialog wide title={briefFocusId ? '이 기능으로 AI와 논의하기' : '이 지도로 AI와 논의하기'} subtitle={briefFocusId ? graph.nodes.find((node) => node.id === briefFocusId)?.label : '기능별 의견과 변경안을 지금 사용하는 AI에게 건네세요.'} onClose={() => setDialog(null)}>
       <div className="sm-brief-summary"><ShapeIcon name="mail" size={20} /><p>AI가 읽을 글을 현재 지도에서 만들었습니다.<br /><span>AI가 원본 지도를 고치면 열린 화면에도 반영됩니다.</span></p></div>
       <label className="sm-sr-only" htmlFor="sm-ai-brief">AI에게 전달할 지도와 논의 내용</label><textarea id="sm-ai-brief" className="sm-brief-text" value={brief || '현재 지도의 논의를 모으고 있습니다…'} readOnly />
       <div className="sm-form-actions"><button className="sm-button" disabled={!brief} onClick={downloadBrief}><ShapeIcon name="download" size={15} />글로 저장</button><button className="sm-button sm-button--dark" disabled={!brief} onClick={copyBrief}><ShapeIcon name={copied ? 'check' : 'copy'} size={15} />{copied ? '복사했습니다' : '논의 내용 복사'}</button></div>

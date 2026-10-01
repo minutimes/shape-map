@@ -48,6 +48,21 @@ function assertReadable(nodes, edges) {
 }
 
 describe('composition connector routing', () => {
+  it('keeps internal connections out of other sub-systems and their title bands', () => {
+    const nodes = [
+      { id: 'assembly', type: 'shapeGroup', position: { x: 0, y: 0 }, style: { width: 650, height: 400 }, data: { headerHeight: 60 } },
+      { id: 'destination', type: 'shapeBlock', parentId: 'assembly', position: { x: 18, y: 78 }, style: { width: 220, height: 78 }, data: {} },
+      { id: 'engine', type: 'shapeGroup', parentId: 'assembly', position: { x: 258, y: 78 }, style: { width: 370, height: 290 }, data: { headerHeight: 60 } },
+    ];
+    const input = [{ id: 'internal', type: 'shapeConnection', source: 'assembly', target: 'destination', sourceHandle: 'bottom', targetHandle: 'top', label: '내부 결과 전달', data: { link: { label: '내부 결과 전달' } } }];
+    const [edge] = routeShapeEdges(nodes, input);
+    const engine = { x: 258, y: 78, width: 370, height: 290 };
+    for (const segment of routeSegments(edge.data.route.points)) expect(segmentHitsRect(segment, engine, 1)).toBe(false);
+    const recolored = routeShapeEdges(nodes.map((node) => ({ ...node, selected: true })), input.map((item) => ({ ...item, style: { opacity: .2 }, data: { ...item.data, ownerNote: '새 메모' } })))[0];
+    expect(recolored.data.route).toBe(edge.data.route);
+    expect(recolored.style.opacity).toBe(.2); expect(recolored.data.ownerNote).toBe('새 메모');
+    expect(input[0].data).not.toHaveProperty('route');
+  });
   it.each([1237, 1072, 900])('separates shared ports, lanes, and explanations at a %i px canvas', (availableWidth) => {
     const graph = fixture(); const before = structuredClone(graph);
     const layout = shapeLayout(graph, { availableWidth });

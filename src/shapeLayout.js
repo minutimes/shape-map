@@ -1,4 +1,5 @@
 import { splitMapSections } from './mapScope.js';
+import { measureShapeCard, shapeCardTitle } from './shapePacking.js';
 
 export const SHAPE_VIEWS = [
   { id: 'system', label: '시스템 구성도', description: '어떤 기능이 모여 제품을 이루는지 봅니다.' },
@@ -21,7 +22,7 @@ export function defaultShapeCollapsed(graph, focusId) {
   const focusDepth = shapeAncestors(graph, focusId).length;
   const parents = new Set(graph.nodes.map((node) => node.parentId));
   const wholeSystem = !graph.nodes.find((node) => node.id === focusId)?.parentId;
-  return graph.nodes.filter((node) => parents.has(node.id) && (wholeSystem ? shapeAncestors(graph, node.id).length >= focusDepth + 1 : shapeAncestors(graph, node.id).length > focusDepth + 2)).map((node) => node.id);
+  return graph.nodes.filter((node) => parents.has(node.id) && (wholeSystem ? shapeAncestors(graph, node.id).length >= focusDepth + 2 : shapeAncestors(graph, node.id).length > focusDepth + 2)).map((node) => node.id);
 }
 
 export function absoluteShapePosition(nodes, id) {
@@ -90,40 +91,30 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   const collapsed = new Set(collapsedIds || defaultShapeCollapsed(graph, root.id));
   const result = [];
   const wholeSystem = !root.parentId;
-  const columns = compact || singleColumn || groups.length === 1 || root.workflow?.mode === 'sequence' ? 1 : wholeSystem && availableWidth >= 1000 ? 3 : 2;
-  const width = compact ? 340 : columns === 1 ? 650 : wholeSystem ? Math.max(300, Math.min(500, (availableWidth - 120) / columns)) : Math.max(340, Math.min(650, (availableWidth - 150) / 2));
-  const columnGap = wholeSystem ? 45 : 100;
-  const inset = (cardWidth) => cardWidth > 300 ? 20 : cardWidth > 200 ? 8 : 0;
-  const measure = (node, cardWidth, depth) => {
-    const titleHeight = lines(node.label, Math.max(100, cardWidth - 42), depth ? 14 : 16) * 22;
-    const header = (children.get(node.id).length ? 60 : 32) + titleHeight + ((node.block?.summary || node.task?.logic) ? 34 : 0);
-    const items = collapsed.has(node.id) ? [] : children.get(node.id);
-    if (!items.length) return { height: header + 8, header, items: [], group: children.get(node.id).length > 0 };
-    const sizes = items.map((child) => measure(child, cardWidth - inset(cardWidth) * 2, depth + 1));
-    return { height: header + 18 + sizes.reduce((sum, size) => sum + size.height + 18, 0), header, items, sizes, group: true };
-  };
-  const draw = (node, cardWidth, x, y, depth, parentId, size) => {
-    const card = place(node, size.group ? 'shapeGroup' : 'shapeBlock', x, y, cardWidth, size.height,
+  const columns = compact ? 1 : root.workflow?.mode === 'sequence' ? groups.length : wholeSystem ? 3 : 2;
+  const sizes = groups.map((group) => measureShapeCard(group, children, collapsed, 0, compact));
+  const columnGap = wholeSystem ? 60 : 80;
+  const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(0, ...sizes.filter((_, index) => index % columns === column).map((size) => size.width)));
+  const draw = (node, x, y, depth, parentId, size) => {
+    const card = place(node, size.group ? 'shapeGroup' : 'shapeBlock', x, y, size.width, size.height,
       { ...(parentId ? { parentId, extent: 'parent' } : {}), draggable: !parentId, zIndex: depth + 1 });
     card.data = { ...card.data, depth, collapsed: collapsed.has(node.id), headerHeight: size.header,
-      index: groups.indexOf(node) + 1, nested: true };
+      index: groups.indexOf(node) + 1, nested: true, architecture: true, title: shapeCardTitle(node, depth), showDescription: size.description };
     result.push(card);
-    let childY = size.header + 8;
     size.items.forEach((child, index) => {
-      draw(child, cardWidth - inset(cardWidth) * 2, inset(cardWidth), childY, depth + 1, node.id, size.sizes[index]);
-      childY += size.sizes[index].height + 18;
+      draw(child, size.slots[index].x, size.slots[index].y, depth + 1, node.id, size.sizes[index]);
     });
   };
   let rowY = 0;
   for (let row = 0; row < Math.ceil(groups.length / columns); row += 1) {
-    let rowHeight = 0;
+    let rowHeight = 0; let columnX = 0;
     groups.slice(row * columns, (row + 1) * columns).forEach((group, column) => {
-      const size = measure(group, width, 0);
+      const size = sizes[row * columns + column];
       rowHeight = Math.max(rowHeight, size.height);
-      const position = positions[group.id] || { x: column * (width + columnGap), y: rowY };
-      draw(group, width, position.x, position.y, 0, null, size);
+      const position = positions[group.id] || { x: columnX, y: rowY };
+      draw(group, position.x, position.y, 0, null, size);
+      columnX += columnWidths[column] + columnGap;
     });
-    // Reserve enough room for independent handoffs and their explanations.
     rowY += rowHeight + (wholeSystem ? 120 : 86);
   }
   const visible = new Map(result.map((node) => [node.id, node]));
@@ -155,8 +146,10 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
     if (pairs.has(key)) return;
     pairs.add(key);
     const from = absoluteShapePosition(result, source); const to = absoluteShapePosition(result, target);
-    const vertical = Math.abs(from.y - to.y) > 5 || Math.abs(from.x - to.x) < 5;
     const fromNode = visible.get(source); const toNode = visible.get(target);
+    const separatedHorizontally = from.x + fromNode.style.width <= to.x || to.x + toNode.style.width <= from.x;
+    const vertical = (fromNode.parentId || toNode.parentId) && separatedHorizontally ? false
+      : Math.abs(from.y - to.y) > 5 || Math.abs(from.x - to.x) < 5;
     const siblings = result.filter((node) => node.id !== source && node.id !== target
       && node.parentId === fromNode.parentId && fromNode.parentId === toNode.parentId);
     const columnDetour = Math.abs(from.x - to.x) < 5 && siblings.some((node) => {

@@ -192,6 +192,19 @@
 .sm-group__title { display: block; width: 100%; margin-top: 8px; line-height: 22px; font-size: 14px; white-space: normal; overflow-wrap: anywhere; }
 .sm-group--depth-0 > .sm-group__title { font-size: 16px; }
 .sm-group__title:hover { color: #171724; text-decoration: underline; text-underline-offset: 3px; }
+.sm-architecture.sm-group { padding: 12px 17px; border-radius: 9px; }
+.sm-architecture.sm-group:not(.sm-group--depth-0) { padding: 10px 11px; background: #f9f9fa; border-radius: 6px; }
+.sm-architecture .sm-feature-hints { display: none; }
+.sm-architecture .sm-group__header { min-height: 20px; gap: 6px; }
+.sm-architecture .sm-group__fold { margin-left: auto; }
+.sm-architecture .sm-group__title { margin-top: 5px; line-height: 20px; font-size: 14px; }
+.sm-architecture.sm-group--depth-0 > .sm-group__title { font-size: 18px; line-height: 24px; }
+.sm-architecture .sm-group__description { margin: 5px 0 0; line-height: 15px; font-size: 10px; -webkit-line-clamp: 2; }
+.sm-architecture.sm-block { padding: 9px 11px; border-radius: 5px; box-shadow: none; }
+.sm-architecture .sm-block__top { min-height: 12px; }
+.sm-architecture .sm-block__title { font-size: 14px; line-height: 20px; margin-top: 5px; }
+.sm-architecture.is-collapsed { background: #fff; }
+.sm-architecture.is-selected { box-shadow: 0 0 0 2px #53535f; }
 .sm-group__description { margin: 7px 0 0; font-size: 11px; line-height: 16px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .sm-block__top { justify-content: flex-start; }
 .sm-feature-hints { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; min-width: 0; overflow: hidden; }
@@ -404,3 +417,42 @@
 @media (max-width: 850px) { .sm-sidebar { display: none; } .sm-mobile-menu { display: inline-grid; margin-left: -6px; } .sm-sidebar.is-open { display: flex; position: absolute; z-index: 15; top: 66px; left: 0; bottom: 0; width: 245px; padding: 22px 16px; box-shadow: 8px 0 25px #20202c14; } .sm-sidebar__close { display: inline-grid; margin-left: auto; } .sm-sidebar__project { margin-right: 0; } .sm-project-name { max-width: 180px; } .sm-save-state { margin-right: 0; } .sm-detail-link { display: none; } .sm-inspector { position: absolute; right: 0; top: 66px; bottom: 0; width: 337px; min-width: 0; box-shadow: -10px 0 25px #20202c12; } .has-inspector .sm-canvas { margin-right: 0; } .sm-timeline { min-height: 124px; } }
 @media (max-width: 540px) { .sm-topbar { padding: 0 15px; gap: 12px; height: 59px; min-height: 59px; } .sm-brand { font-size: 20px; gap: 9px; } .sm-logo { width: 23px; height: 23px; } .sm-logo::before, .sm-logo::after { width: 15px; height: 15px; } .sm-project-name, .sm-topbar__divider, .sm-save-state { display: none; } .sm-topbar__actions { gap: 0; } .sm-topbar__actions > .sm-button { min-height: 32px; font-size: 10px; padding: 0 9px; } .sm-topbar__actions > .sm-button svg { width: 13px; } .sm-stage-heading { padding: 19px 16px 14px; gap: 8px; } .sm-stage-heading h1 { font-size: 18px; letter-spacing: -.6px; gap: 7px; } .sm-stage-heading h1 > span { display: none; } .sm-stage-heading > .sm-button { min-height: 31px; font-size: 10px; padding: 0 8px; } .sm-breadcrumb { margin-bottom: 6px; } .sm-status-legend { padding: 0 16px 12px; gap: 10px; } .sm-legend-item { font-size: 9px; gap: 4px; } .sm-legend-item b { font-size: 8px; min-width: 12px; } .sm-canvas { min-height: 150px; } .sm-canvas-bottom { right: 13px; bottom: 13px; left: 13px; } .sm-timeline { padding: 12px 15px 9px; min-height: 117px; } .sm-timeline__heading { margin-bottom: 9px; } .sm-turn { min-width: 130px; padding: 6px 8px; } .sm-turn small { display: none; } .sm-timeline__track { gap: 10px; } .sm-turn-position { font-size: 8px; } .sm-turns { gap: 3px; } .sm-timeline-slider { margin-left: 40px; } .sm-inspector { top: 59px; width: 100%; border-left: 0; } .sm-inspector__heading { padding-top: 19px; } .sm-inspector h2 { font-size: 23px; } .sm-inspector__body { padding-top: 23px; } .sm-inspector__description { font-size: 14px; } .sm-inspector .sm-state { font-size: 11px; } .sm-inspector-tabs button { font-size: 12px; } .sm-inspector__children > button, .sm-comment p { font-size: 13px; } .sm-form :is(input:not([type='radio']), textarea, select) { font-size: 16px; } .sm-sidebar.is-open { top: 59px; width: 260px; } .sm-dialog-backdrop { padding: 13px; } .sm-dialog { padding: 21px; max-height: calc(100dvh - 26px); } .sm-dialog__header h2 { font-size: 19px; } .sm-replay-badge { left: 12px; max-width: calc(100% - 24px); flex-wrap: wrap; line-height: 1.7; } .sm-toast { bottom: 16px; font-size: 11px; width: max-content; } }
 @media (prefers-reduced-motion: reduce) { .shape-workspace *, .shape-workspace *::before, .shape-workspace *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+
+/* An object editor floats beside the selected feature; the canvas keeps its size. */
+.sm-stage { position: relative; }
+.sm-inspector-anchor { position: absolute; inset: 0; pointer-events: none; z-index: 9; }
+.sm-inspector-leader { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.sm-inspector-leader path { fill: none; stroke: #777784; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.sm-inspector-leader circle { fill: #555563; stroke: #fff; stroke-width: 1.5; }
+.sm-inspector-popup { position: absolute; pointer-events: auto; border: 1px solid #cccdd5; border-radius: 12px; background: #fff; box-shadow: 0 12px 42px #2424321c, 0 2px 8px #2424320c; overflow: hidden; }
+.sm-inspector-popup .sm-inspector { position: static; width: 100%; min-width: 0; height: 100%; border: 0; box-shadow: none; outline: none; }
+.sm-inspector-popup .sm-inspector__heading { padding: 14px 20px 0; }
+.sm-inspector-popup .sm-inspector h2 { margin: 5px 20px 8px; font-size: 19px; }
+.sm-inspector-popup .sm-inspector > .sm-state { margin: 0 20px 15px; }
+.sm-inspector-popup .sm-inspector-tabs { padding: 0 20px; gap: 16px; }
+.sm-inspector-popup .sm-inspector__body { padding: 20px; overscroll-behavior: contain; }
+.sm-inspector-popup .sm-inspector__footer { padding: 10px 20px; }
+.sm-inspector__footer > span { flex: 1; }
+.sm-inspector__footer > button { display: inline-flex; gap: 5px; align-items: center; border: 0; background: transparent; color: #626271; font-size: 10px; padding: 4px 0; flex-shrink: 0; }
+@media (max-width: 540px) {
+  .sm-inspector-popup .sm-inspector h2 { font-size: 20px; }
+  .sm-inspector-popup .sm-inspector-tabs { gap: 15px; }
+  .sm-inspector-popup .sm-inspector-tabs button { font-size: 11px; }
+}
+.sm-architecture.sm-group.is-collapsed:not(.sm-group--depth-0) { position: relative; padding: 9px 11px; }
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) > .sm-group__title,
+.sm-architecture.sm-block .sm-block__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) > .sm-group__title { margin-top: 0; }
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) > .sm-group__header { position: absolute; left: 11px; right: 7px; bottom: 4px; height: 20px; }
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) > .sm-group__header .sm-state { font-size: 0; gap: 0; }
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) .sm-group__index { font-size: 9px; }
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) .sm-group__fold,
+.sm-architecture.is-collapsed:not(.sm-group--depth-0) .sm-group__focus { width: 20px; min-width: 20px; height: 20px; }
+.sm-stage.is-expanded { position: fixed; inset: 66px 0 0; z-index: 11; background: #fff; }
+.sm-stage.is-expanded .sm-stage-heading { padding: 11px 24px; }
+.sm-stage.is-expanded .sm-stage-heading h1 { font-size: 17px; }
+.sm-stage.is-expanded .sm-area-reading { display: none; }
+.sm-stage.is-expanded .sm-status-legend { padding-top: 4px; padding-bottom: 8px; }
+.sm-stage.is-expanded .sm-timeline { min-height: 95px; padding-top: 8px; }
+.sm-stage.is-expanded .sm-timeline__heading { display: none; }
+@media (max-width: 540px) { .sm-stage.is-expanded { top: 59px; } }

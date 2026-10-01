@@ -184,6 +184,25 @@ describe('Shape collaboration backend', () => {
     });
   });
 
+  it('exports object-specific human notes and proposals for AI with their saved hierarchy', async () => {
+    const { store } = await fixture(); let snapshot = store.getSnapshot();
+    snapshot = await store.mutate({ baseRevision: snapshot.revision, clientId: 'owner', operation: { type: 'addComment', id: 'planning', body: '이 기능은 결과부터 보여 주세요.', kind: 'change', author: '사람' } });
+    snapshot = await store.mutate({ baseRevision: snapshot.revision, clientId: 'owner', operation: { type: 'setProposal', id: 'planning', proposal: { reason: '구성을 읽기 어렵습니다.', logic: '기능 안의 카드를 가로로 보여줍니다.' } } });
+    snapshot = await store.mutate({ baseRevision: snapshot.revision, clientId: 'owner', operation: { type: 'addComment', id: 'live', body: '다른 영역의 메모', kind: 'note', author: '사람' } });
+    const app = createApiApp(store);
+    const brief = (await request(app).get('/api/brief?focus=planning').expect(200)).body;
+    expect(brief.revision).toBe(snapshot.revision);
+    expect(brief.text).toContain('논의할 기능: [planning]');
+    expect(brief.text).toContain('소속:');
+    expect(brief.text).toContain('개선 의견: 이 기능은 결과부터 보여 주세요. (사람)');
+    expect(brief.text).toContain('구성을 읽기 어렵습니다.');
+    expect(brief.text).toContain('기능 안의 카드를 가로로 보여줍니다.');
+    expect(brief.text).not.toContain('다른 영역의 메모');
+    expect(store.getSnapshot().revision).toBe(snapshot.revision);
+    await request(app).get('/api/brief?focus=absent').expect(422);
+    await request(app).get('/api/brief?focus=planning&focus=live').expect(422);
+  });
+
   it('guards explicit form saves by semantic fingerprint while allowing unrelated fresh-CAS changes', async () => {
     const { store } = await fixture();
     let snapshot = store.getSnapshot();

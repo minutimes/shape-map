@@ -74,7 +74,9 @@ npm run status:local
 ## Work with an AI
 
 1. Click a feature. Leave a note, a concern, or a proposed change.
-2. Use **AI와 논의** to copy or save a readable discussion brief.
+2. Click a card to open its attached editor, write a memo or proposal, and save it.
+   Use **AI에 전달** for that feature and its parts, or **AI와 논의** for the whole
+   map, to copy or save a readable discussion brief.
 3. Give the brief and map to your coding agent. The agent can edit the shared
    Mermaid file or use the revision-checked local API.
 4. Watch the open canvas update. Inspect the implementation, confirm features

@@ -19,6 +19,16 @@ async function fixture(options = {}) {
 afterEach(async () => { while (cleanups.length) await cleanups.pop()(); });
 
 describe('MapStore', () => {
+  it('migrates a vertical composition view independently of the canonical map and other editor navigation', async () => {
+    const { store, mapPath } = await fixture(); const before = store.getSnapshot(); const source = await fs.readFile(mapPath, 'utf8');
+    await store.updateView({ baseRevision: before.revision, clientId: 'old', patch: {
+      positions: { live: { x: 12, y: 34 } }, shape: { layoutVersion: 2, positions: { live: { x: 100, y: 200 } }, collapsedIds: ['live'], viewport: { x: 3, y: 4, zoom: .7 } },
+    } });
+    const next = await store.updateView({ baseRevision: before.revision, clientId: 'horizontal', patch: { shape: { layoutVersion: 3 } } });
+    expect(next.view.shape).toEqual({ layoutVersion: 3 });
+    expect(next.view.positions).toEqual({ live: { x: 12, y: 34 } });
+    expect(next.revision).toBe(before.revision); expect(await fs.readFile(mapPath, 'utf8')).toBe(source);
+  });
   it('upgrades nested canvas navigation without retaining obsolete placement or changing source', async () => {
     const { store } = await fixture(); const before = store.getSnapshot();
     await store.updateView({ baseRevision: before.revision, clientId: 'old-canvas', patch: {

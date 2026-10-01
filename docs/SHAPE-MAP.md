@@ -3,7 +3,8 @@
 The product workspace is the default route. `?editor=1` opens the detailed
 hierarchy editor. Both edit the same source and preserve the same feature IDs.
 
-The whole-system view starts with folded areas and the main handoffs. Explicit
+The whole-system view shows the main areas and their immediate internal cards,
+folding deeper containers, with the main handoffs. Explicit
 area relationships remain visible; **Detailed connections** exposes the smaller
 data connections. Entering an area opens deeper nested cards. An explicit focus
 link opens that area at a readable scale rather than restoring a different view's
@@ -81,7 +82,10 @@ as implementation changes. A change to the feature invalidates its prior review.
 
 ## API and AI use
 
-`GET /api/brief` returns `{text,mapPath,revision}`. `GET /api/repository` returns
+`GET /api/brief` returns `{text,mapPath,revision}`. The optional `?focus=NODE_ID`
+limits the brief to that feature and its descendants, retaining incident
+connections, saved parentage, human memos, and proposals. Unknown IDs are rejected.
+`GET /api/repository` returns
 real Git commits and the connected features inferred from their changed paths.
 External map workspaces require `SHAPE_MAP_REPOSITORY_ROOT` to connect Git.
 
@@ -127,18 +131,38 @@ authoring channel; its declarations are descriptions, not verified runtime proof
 ## Canvas and durability
 
 `PUT /api/view` accepts `patch.shape` with positions, viewport, fold state, and
-`layoutVersion: 2` for the nested composition layout. Upgrading resets outdated
-composition positions and viewport, preserving legacy editor navigation.
+`layoutVersion: 3` for horizontal nested composition. Version 2 remains readable
+for older clients. Upgrading resets outdated composition positions, viewport,
+and folding, preserving legacy editor navigation and all source content.
 It is independent of legacy structure/workflow navigation and contains no semantic
 data. Dragging a composition area repositions its child cards without reparenting.
-Composition and product views recursively nest cards, with wrapped full titles.
+Composition and product views recursively pack cards in ordered horizontal grids.
+Dense containers grow to hold their contents; rough branches keep smaller frames.
+Sequences retain authored order. Deep branches never squeeze descendants narrower
+with each level. The full label remains canonical and accessible; compact tiles
+show the name before a descriptive separator when a label is long, with up to
+two visible lines. Complete names and authored descriptions appear in the editor.
 The fold button expands parts on the same canvas. Card clicks open details;
 the separate focus button enters an area. Connections between containers attach
 to their boundaries by default; the detailed-connections control exposes their
 saved endpoints. Only an explicit sequence or recorded connection creates a
 flow arrow. Function hierarchy is progressive: enter a feature to see its parts.
-Small screens use one column and readable initial zoom. Overview titles remain
-readable while zoomed out.
+Phones use one column with a readable initial zoom. Tablet and desktop diagrams
+retain their horizontal composition. Composition cards do not create floating
+title capsules on zoom out. The function hierarchy retains its overview labels.
+The canvas can expand within the app for broad diagrams; the fit control includes
+all cards, return routes, and labels.
+Connection routing reserves parent title bands and handles unequal grid heights.
+When a dense diagram has no clear space for an inline explanation, the complete
+saved text remains on edge hover and in the connection inspector.
+
+Selecting a card opens a nonmodal editor attached beside its screen position,
+with a leader back to the selected card. Panning and zooming move the attachment
+without resizing the canvas. The editor switches sides or uses a contained sheet
+on small screens. Hidden descendants attach to their nearest visible ancestor.
+Escape closes it and restores focus. Existing description, proposal, memo,
+history, connection, local-draft, and conflict behavior remains shared. Its AI
+action exports the selected feature's saved discussion; unsaved drafts stay local.
 
 The whole-system projection initially folds deeper containers; entering an area
 exposes more levels without limiting the source's hierarchy. The scope bar counts

@@ -3,6 +3,7 @@ const SIDES = { in: 'left', out: 'right', 'left-source': 'left', 'right-target':
 const NORMALS = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
 const same = (a, b) => a.x === b.x && a.y === b.y;
 const distance = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const routeCache = new Map();
 
 export function routeSegments(points) {
   return points.slice(1).map((point, index) => [points[index], point]);
@@ -28,14 +29,14 @@ function segmentConflict([a, b], [c, d]) {
     && h[0].y > Math.min(v[0].y, v[1].y) && h[0].y < Math.max(v[0].y, v[1].y) ? 90 : 0;
 }
 
-function simplify(points) {
+function simplify(points, allowRetrace = false) {
   const result = [];
   for (const point of points) {
     if (result.length && same(result.at(-1), point)) continue;
     const a = result.at(-2); const b = result.at(-1);
     if (a && ((a.x === b.x && b.x === point.x) || (a.y === b.y && b.y === point.y))) {
       // A route must not double back on itself to reach a lane behind its port.
-      if ((b.x - a.x) * (point.x - b.x) + (b.y - a.y) * (point.y - b.y) < 0) return null;
+      if (!allowRetrace && (b.x - a.x) * (point.x - b.x) + (b.y - a.y) * (point.y - b.y) < 0) return null;
       result.pop();
     }
     result.push(point);
@@ -51,7 +52,8 @@ function boxesFor(nodes) {
     while (parent && !ancestors.has(parent.id)) {
       ancestors.add(parent.id); x += parent.position.x; y += parent.position.y; parent = byId.get(parent.parentId);
     }
-    return [node.id, { x, y, width: node.measured?.width || node.style.width, height: node.measured?.height || node.style.height, ancestors }];
+    return [node.id, { x, y, width: node.measured?.width || node.style.width, height: node.measured?.height || node.style.height,
+      headerHeight: node.type === 'shapeGroup' && !node.data?.collapsed ? node.data?.headerHeight || 0 : 0, ancestors }];
   }));
 }
 
@@ -119,6 +121,40 @@ function textSize(text) {
     height: lines.length * 15 + 6 };
 }
 
+// Uneven grids need independent exit and entry lanes. Keep the search bounded:
+// ordinary handoffs use the short paths above, with this detour only as a fallback.
+function freeLanePath(a, b, obstacles) {
+  const gaps = (axis) => {
+    const size = axis === 'x' ? 'width' : 'height';
+    const bounds = [...new Set(obstacles.flatMap((box) => [box[axis], box[axis] + box[size]]))].sort((x, y) => x - y);
+    return bounds.slice(1).flatMap((value, index) => value - bounds[index] >= 6 ? [(value + bounds[index]) / 2] : []);
+  };
+  const ys = gaps('y').concat(obstacles.flatMap((box) => [box.y - 3, box.y + box.height + 3]));
+  const exits = (point) => {
+    const values = [...new Set([point.y, ...ys])].filter((y) => !obstacles.some((box) => segmentHitsRect([point, { x: point.x, y }], box, 1))).sort((x, y) => x - y);
+    const near = [...values].sort((x, y) => Math.abs(x - point.y) - Math.abs(y - point.y)).slice(0, 16);
+    return [...new Set([...near, ...values.slice(0, 6), ...values.slice(-6)])];
+  };
+  const sourceYs = exits(a); const targetYs = exits(b);
+  const outerXs = obstacles.filter((box) => box.height === box.headerHeight).flatMap((box) => [box.x - 3, box.x + box.width + 3]);
+  const xs = [...new Set([...channels(obstacles, 'x', (a.x + b.x) / 2, a.x, b.x), ...outerXs])];
+  let best; let bestLength = Infinity;
+  const clear = (from, to) => !obstacles.some((box) => segmentHitsRect([from, to], box, 1));
+  for (const y of sourceYs) {
+    const from = { x: a.x, y }; if (!clear(a, from)) continue;
+    for (const endY of targetYs) {
+      const to = { x: b.x, y: endY }; if (!clear(to, b)) continue;
+      for (const x of xs) {
+        const first = { x, y }; const last = { x, y: endY };
+        const length = distance(a, from) + distance(from, first) + distance(first, last) + distance(last, to) + distance(to, b);
+        if (length >= bestLength || !clear(from, first) || !clear(first, last) || !clear(last, to)) continue;
+        bestLength = length; best = [a, from, first, last, to, b];
+      }
+    }
+  }
+  return best || null;
+}
+
 const rectsOverlap = (a, b) => a.x < b.x + b.width + 6 && a.x + a.width + 6 > b.x && a.y < b.y + b.height + 6 && a.y + a.height + 6 > b.y;
 
 function placeLabel(text, segments, obstacles, occupiedSegments, occupiedLabels) {
@@ -152,6 +188,11 @@ function placeLabel(text, segments, obstacles, occupiedSegments, occupiedLabels)
 export function routeShapeEdges(nodes, edges) {
   const routed = edges.filter((edge) => edge.type === 'shapeConnection');
   if (!routed.length || !nodes.length) return edges;
+  const cacheKey = JSON.stringify([nodes.map((node) => [node.id, node.parentId, node.position.x, node.position.y,
+    node.measured?.width || node.style.width, node.measured?.height || node.style.height, node.data?.headerHeight, node.data?.collapsed]),
+  routed.map((edge) => [edge.id, edge.source, edge.target, edge.sourceHandle, edge.targetHandle, edge.label])]);
+  const cached = routeCache.get(cacheKey);
+  if (cached) return edges.map((edge) => cached.has(edge.id) ? { ...edge, data: { ...edge.data, route: cached.get(edge.id) } } : edge);
   const boxes = boxesFor(nodes);
   const eligible = routed.filter((edge) => boxes.has(edge.source) && boxes.has(edge.target));
   const ports = assignPorts(eligible, boxes);
@@ -163,9 +204,16 @@ export function routeShapeEdges(nodes, edges) {
   for (const edge of order) {
     const source = ports.get(`${edge.id}:source`); const target = ports.get(`${edge.id}:target`);
     const from = boxes.get(edge.source); const to = boxes.get(edge.target);
-    const obstacles = [...boxes].filter(([id, box]) => !from.ancestors.has(id) && !to.ancestors.has(id)
-      && !box.ancestors.has(edge.source) && !box.ancestors.has(edge.target)).map(([, box]) => box);
-    const stub = from.ancestors.size || to.ancestors.size ? 7 : 12;
+    const withinSource = to.ancestors.has(edge.source); const withinTarget = from.ancestors.has(edge.target);
+    const obstacles = [...boxes].flatMap(([id, box]) => {
+      if (from.ancestors.has(id) || to.ancestors.has(id)) {
+        // Connections may travel within a shared container, leaving its title
+        // and controls readable above the children.
+        return box.headerHeight && id !== edge.source && id !== edge.target ? [{ ...box, height: box.headerHeight }] : [];
+      }
+      return (!box.ancestors.has(edge.source) || withinSource) && (!box.ancestors.has(edge.target) || withinTarget) ? [box] : [];
+    });
+    const stub = from.ancestors.size || to.ancestors.size ? Math.min(7, Math.max(1, distance(source, target) / 3)) : 12;
     const extend = (point) => ({ x: point.x + NORMALS[point.side][0] * stub, y: point.y + NORMALS[point.side][1] * stub });
     const a = extend(source); const b = extend(target);
     const candidates = [[source, a, { x: b.x, y: a.y }, b, target], [source, a, { x: a.x, y: b.y }, b, target]];
@@ -176,19 +224,42 @@ export function routeShapeEdges(nodes, edges) {
       const points = simplify(candidate); if (!points) continue;
       const segments = routeSegments(points);
       let cost = segments.reduce((sum, segment) => sum + distance(...segment)
-        + obstacles.filter((box) => segmentHitsRect(segment, box, 1)).length * 1000000
+        + obstacles.filter((box) => segmentHitsRect(segment, box, 1)).length * 10000000000
         + occupiedSegments.reduce((total, other) => total + segmentConflict(segment, other), 0)
         + occupiedLabels.filter((box) => segmentHitsRect(segment, box, 5)).length * 100000, 0) + segments.length * 12;
       if (best && cost >= best.cost) continue;
       const placement = placeLabel(edge.label, segments, obstacles, occupiedSegments, occupiedLabels);
       cost += placement.cost;
-      if (!best || cost < best.cost) best = { points, label: placement.label, cost };
+      if (!best || cost < best.cost) best = { points, label: placement.cost < 100000 ? placement.label : null, cost };
+    }
+    if (best?.cost >= 10000000000) {
+      let free = freeLanePath(a, b, obstacles);
+      if (!free) {
+        const rotate = (point) => ({ x: point.y, y: point.x });
+        const rotated = obstacles.map((box) => ({ ...box, x: box.y, y: box.x, width: box.height, height: box.width,
+          headerHeight: box.height === box.headerHeight ? box.width : 0 }));
+        free = freeLanePath(rotate(a), rotate(b), rotated)?.map(rotate);
+      }
+      const points = free && simplify([source, ...free, target], true);
+      if (points && !routeSegments(points).some((segment) => obstacles.some((box) => segmentHitsRect(segment, box, 1)))) {
+        const segments = routeSegments(points);
+        const placement = placeLabel(edge.label, segments, obstacles, occupiedSegments, occupiedLabels);
+        best = { points, label: placement.cost < 100000 ? placement.label : null };
+      }
     }
     if (!best) continue;
     occupiedSegments.push(...routeSegments(best.points));
     if (best.label) occupiedLabels.push(best.label.rect);
     routes.set(edge.id, { points: best.points, label: best.label });
   }
+  // Dense graphs can have no free space for every explanation. Keep the saved
+  // label on its edge (and in the inspector) instead of covering another line.
+  for (const [id, route] of routes) if (route.label && [...routes].some(([otherId, other]) => otherId !== id
+    && routeSegments(other.points).some((segment) => segmentHitsRect(segment, route.label.rect, 2)))) {
+    route.label = null; route.labelDeferred = true;
+  }
+  if (routeCache.size >= 4) routeCache.delete(routeCache.keys().next().value);
+  routeCache.set(cacheKey, routes);
   return edges.map((edge) => routes.has(edge.id) ? { ...edge, data: { ...edge.data, route: routes.get(edge.id) } } : edge);
 }
 
