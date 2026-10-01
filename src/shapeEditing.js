@@ -1,5 +1,7 @@
 import { historyEntryForOperation, deletionHistoryEntry, viewHistoryEntry } from './history.js';
 import { absoluteShapePosition } from './shapeLayout.js';
+import { normalizePlacementAnchors } from '../lib/placement.mjs';
+import { shapePlacementAnchor } from './shapePlacement.js';
 
 const clone = (value) => structuredClone(value);
 const fresh = (prefix) => `${prefix}_${crypto.randomUUID().replaceAll('-', '_')}`;
@@ -9,7 +11,7 @@ export function shapeViewHistoryEntry(patch, before, anchorId = null) {
   const changed = Object.keys(patch).some((field) => {
     if (field === 'layoutVersion') return false;
     if (field === 'collapsedIds') return JSON.stringify([...new Set(patch[field])].sort()) !== JSON.stringify([...new Set(before[field] || [])].sort());
-    if (field === 'positions' || field === 'sizes') return Object.entries(patch[field]).some(([id, value]) => JSON.stringify(value ?? null) !== JSON.stringify(before[field]?.[id] ?? null));
+    if (['positions', 'sizes', 'anchors'].includes(field)) return Object.entries(patch[field]).some(([id, value]) => JSON.stringify(value ?? null) !== JSON.stringify(before[field]?.[id] ?? null));
     return JSON.stringify(patch[field]) !== JSON.stringify(before[field]);
   });
   if (!changed) return null;
@@ -164,10 +166,17 @@ export function shapeConnectionAtPoint(nodes, sourceId, source, pointer, toleran
 }
 
 /** Preview a reparent at the drop position, without repacking the entire map. */
-export function reparentShapePreview(graph, nodes, id, parentId, position, collapsedIds) {
+export function reparentShapePreview(graph, nodes, id, parentId, position, collapsedIds, anchors = {}) {
+  const nextGraph = { ...graph, nodes: graph.nodes.map((node) => node.id === id ? { ...node, parentId } : node) };
+  const displayParent = nodes.some((node) => node.id === parentId) ? parentId : undefined;
+  const nextNodes = nodes.map((node) => node.id === id ? { ...node, parentId: displayParent, position } : node);
+  const validAnchors = normalizePlacementAnchors(anchors, nextGraph);
   return {
-    graph: { ...graph, nodes: graph.nodes.map((node) => node.id === id ? { ...node, parentId } : node) },
+    graph: nextGraph,
     positions: { ...Object.fromEntries(nodes.map((node) => [node.id, { ...node.position }])), [id]: position },
+    // Reparenting changes the old container's measured size. Do not bind other
+    // unedited cards to that stale size while previewing the drop.
+    anchors: { ...validAnchors, [id]: shapePlacementAnchor(nextNodes, id, position, displayParent, validAnchors) },
     collapsedIds: collapsedIds.filter((item) => item !== parentId),
   };
 }

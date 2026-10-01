@@ -20,6 +20,23 @@ async function fixture(options = {}) {
 afterEach(async () => { while (cleanups.length) await cleanups.pop()(); });
 
 describe('MapStore', () => {
+  it('persists responsive placements, rejects cycles, and restores references removed by deletion', async () => {
+    const { store, root, mapPath } = await fixture(); const before = store.getSnapshot(); const source = await fs.readFile(mapPath, 'utf8');
+    const anchors = { shortform: { x: { id: 'live', edge: 'right', offset: 35 }, y: { ids: ['live'], edge: 'top', offset: 0 } } };
+    const next = await store.updateView({ baseRevision: before.revision, clientId: 'placement', patch: { shape: { layoutVersion: 3, anchors } } });
+    expect(next.view.shape.anchors).toEqual(anchors); expect(next.revision).toBe(before.revision); expect(await fs.readFile(mapPath, 'utf8')).toBe(source);
+    await expect(store.updateView({ baseRevision: next.revision, clientId: 'invalid', patch: { shape: { anchors: { live: { x: { id: 'shortform', edge: 'left', offset: 0 } } } } } })).rejects.toMatchObject({ code: 'validation_error' });
+    await expect(store.updateView({ baseRevision: next.revision, clientId: 'invalid', patch: { shape: { anchors: { shortform: { x: { id: 'planning', edge: 'right', offset: 0 } } } } } })).rejects.toMatchObject({ code: 'validation_error' });
+    const entry = shapeHistoryEntry({ type: 'deleteSubtrees', ids: ['live'] }, next);
+    const deleted = await store.mutate({ baseRevision: next.revision, clientId: 'placement', operation: entry.redo });
+    expect(deleted.view.shape.anchors).toEqual({});
+    const restored = await store.mutate({ baseRevision: deleted.revision, clientId: 'placement', operation: entry.undo });
+    await store.updateView({ baseRevision: restored.revision, clientId: 'placement', patch: { shape: { anchors } } });
+    const reopened = await createMapStore({ projectRoot: root, mapPath: 'maps/demo.mmd', watchFiles: false });
+    expect(reopened.getSnapshot().view.shape.anchors).toEqual(anchors); await reopened.close();
+    const removed = await store.updateView({ baseRevision: restored.revision, clientId: 'undo', patch: { shape: { anchors: { shortform: null } } } });
+    expect(removed.view.shape.anchors).toEqual({});
+  });
   it('persists mixed folds, creation, movement, resizing, and deletion in reversible edit order', async () => {
     const { store, root, mapPath } = await fixture();
     const clientId = 'mixed-canvas-history';

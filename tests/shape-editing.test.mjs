@@ -135,7 +135,7 @@ describe('studio editing contracts', () => {
     const before = structuredClone(graph);
     const nodes = shapeLayout(graph, { collapsedIds: [], positions: { b: { x: 600, y: 0 } } }).nodes;
     const preview = reparentShapePreview(graph, nodes, 'child', 'b', { x: 50, y: 130 }, ['b']);
-    const next = shapeLayout(preview.graph, { positions: preview.positions, collapsedIds: preview.collapsedIds }).nodes;
+    const next = shapeLayout(preview.graph, { positions: preview.positions, anchors: preview.anchors, collapsedIds: preview.collapsedIds }).nodes;
     expect(next.find((node) => node.id === 'child')).toMatchObject({ parentId: 'b', position: { x: 50, y: 130 } });
     for (const id of ['a', 'b']) expect(absoluteShapePosition(next, id)).toEqual(absoluteShapePosition(nodes, id));
     expect(preview.collapsedIds).toEqual([]);
@@ -145,7 +145,7 @@ describe('studio editing contracts', () => {
     const graph = applyOperation(fixture(), { type: 'setNodeWorkflow', id: 'b', workflow: { mode: 'group' } });
     const nodes = shapeLayout(graph, { collapsedIds: [] }).nodes;
     const preview = reparentShapePreview(graph, nodes, 'child', 'b', { x: 50, y: 130 }, []);
-    const next = shapeLayout(preview.graph, { positions: preview.positions, collapsedIds: [] }).nodes;
+    const next = shapeLayout(preview.graph, { positions: preview.positions, anchors: preview.anchors, collapsedIds: [] }).nodes;
     const a = next.find((node) => node.id === 'a'); const b = next.find((node) => node.id === 'b');
     expect(b.position.x).toBeGreaterThanOrEqual(a.position.x + a.style.width + 12);
     expect(preview.positions.b).toEqual(nodes.find((node) => node.id === 'b').position);

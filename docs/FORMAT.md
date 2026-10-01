@@ -94,6 +94,14 @@ would overlap a sibling, the canvas gives it room in reading order and grows its
 container. This derived spacing does not overwrite saved positions. Folding or
 undoing the expansion restores the arrangement from those same preferences.
 
+Optional `shape.anchors` remembers manual placement relative to sibling cards:
+`x: {id, edge: "left" | "right", offset}` aligns a column or follows a left
+neighbor; `y: {ids, edge: "top" | "bottom", offset}` follows a row's top or
+greatest bottom. Offsets use the same section-relative coordinates as positions.
+References must be siblings and cannot contain cycles. Missing or stale references
+are filtered on read. An anchor patch is merged by feature ID; `null` removes it.
+Anchors participate in spatial undo and redo and never alter Mermaid hierarchy.
+
 The view may also contain independent workflow navigation state:
 
 ```json

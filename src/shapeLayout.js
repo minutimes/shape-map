@@ -42,7 +42,7 @@ function lines(text, width, size) {
 }
 
 /** All three views project the same saved nodes. Position never changes parentage. */
-export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, sizes: customSizes = {}, states = {}, onOpen, onActivate, onFocus, onToggle, onResize, collapsedIds, reading = {}, showActivation = false, detailedLinks = false, availableWidth = 1500, compact = false, singleColumn = false } = {}) {
+export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, sizes: customSizes = {}, anchors = {}, states = {}, onOpen, onActivate, onFocus, onToggle, onResize, collapsedIds, reading = {}, showActivation = false, detailedLinks = false, availableWidth = 1500, compact = false, singleColumn = false } = {}) {
   const system = splitMapSections(graph).system;
   const nodes = system.nodes;
   const root = nodes.find((node) => node.id === focusId) || nodes.find((node) => !node.parentId);
@@ -92,7 +92,7 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
   const result = [];
   const wholeSystem = !root.parentId;
   const columns = compact ? 1 : root.workflow?.mode === 'sequence' ? groups.length : wholeSystem ? 3 : 2;
-  const sizes = groups.map((group) => measureShapeCard(group, children, collapsed, 0, compact, { sizes: customSizes, positions }));
+  const sizes = groups.map((group) => measureShapeCard(group, children, collapsed, 0, compact, { sizes: customSizes, positions, anchors }));
   const columnGap = wholeSystem ? 60 : 80;
   const rowGap = wholeSystem ? 120 : 86;
   const columnWidths = Array.from({ length: columns }, (_, column) => Math.max(0, ...sizes.filter((_, index) => index % columns === column).map((size) => size.width)));
@@ -117,7 +117,7 @@ export function shapeLayout(graph, { focusId, mode = 'system', positions = {}, s
     });
     rowY += rowHeight + rowGap;
   }
-  const slots = settleShapeSlots(sizes, desired, { columnGap, rowGap });
+  const slots = settleShapeSlots(sizes, desired, { columnGap, rowGap, ids: groups.map((group) => group.id), anchors });
   groups.forEach((group, index) => draw(group, slots[index].x, slots[index].y, 0, null, sizes[index]));
   const visible = new Map(result.map((node) => [node.id, node]));
   const byId = new Map(nodes.map((node) => [node.id, node]));

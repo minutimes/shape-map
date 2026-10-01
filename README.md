@@ -21,7 +21,10 @@ windows adapt the controls while retaining the same canvas arrangement and posit
 Cards can contain more cards at any depth. Click a card to expand or fold its
 contents in place. The clicked card stays at the same screen position and zoom.
 Expanding a card makes room among its siblings and neighboring sections. Folding
-it again restores the authored positions; automatic spacing does not overwrite them.
+it again brings the neighboring sections back. Manually moved cards remember
+their row, column, and spacing as nearby cards change size. These relationships
+survive undo, redo, and reopening the map; automatic spacing does not overwrite
+the authored positions.
 Use its pencil to read and edit its role, notes, proposal, attributes, connections,
 and recorded changes. A leaf click selects it. Its stable ID has a copy
 button. **구성·변경 설명** provides a plain-language explanation of the current

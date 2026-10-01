@@ -1,3 +1,5 @@
+import { placementReferences } from '../lib/placement.mjs';
+
 export function shapeCardTitle(node, depth) {
   if (!depth || node.label.length <= 28) return node.label;
   return node.label.split(/\s+[·—]\s+/)[0];
@@ -24,20 +26,32 @@ function rows(sizes, limit, gap) {
 /** Saved positions are preferences, not permission for siblings to overlap.
  * Resolve collisions in reading order without changing the saved coordinates,
  * so folding or undo restores the original arrangement. */
-export function settleShapeSlots(sizes, desired, { gap = 12, columnGap = gap, rowGap = gap } = {}) {
-  const placed = [];
-  return desired.map((slot, index) => {
-    const position = { ...slot }; const size = sizes[index];
-    for (let step = 0; step < index; step += 1) {
+export function settleShapeSlots(sizes, desired, { gap = 12, columnGap = gap, rowGap = gap, ids = [], anchors = {}, minimum } = {}) {
+  const placed = []; const slots = []; const byId = new Map(ids.map((id, index) => [id, index])); const visiting = new Set();
+  const settle = (index) => {
+    if (slots[index] || visiting.has(index)) return;
+    visiting.add(index);
+    const anchor = anchors[ids[index]];
+    placementReferences(anchor).forEach((id) => { if (byId.has(id)) settle(byId.get(id)); });
+    const position = { ...desired[index] }; const size = sizes[index];
+    const x = anchor?.x && byId.get(anchor.x.id); const xSlot = slots[x];
+    if (xSlot) position.x = xSlot.x + (anchor.x.edge === 'right' ? sizes[x].width : 0) + anchor.x.offset;
+    const yRefs = (anchor?.y?.ids || []).map((id) => byId.get(id)).filter((ref) => slots[ref]);
+    if (yRefs.length) position.y = Math.max(...yRefs.map((ref) => slots[ref].y + (anchor.y.edge === 'bottom' ? sizes[ref].height : 0))) + anchor.y.offset;
+    if (minimum) { position.x = Math.max(minimum.x, position.x); position.y = Math.max(minimum.y, position.y); }
+    const slot = { ...position };
+    for (let step = 0; step < placed.length; step += 1) {
       const obstacle = placed.find((rect) => position.x < rect.x + rect.width + gap && position.x + size.width + gap > rect.x
         && position.y < rect.y + rect.height + gap && position.y + size.height + gap > rect.y);
       if (!obstacle) break;
       if (Math.abs(slot.y - obstacle.desired.y) <= gap && slot.x > obstacle.desired.x) position.x = obstacle.x + obstacle.width + columnGap;
       else position.y = obstacle.y + obstacle.height + rowGap;
     }
-    placed.push({ ...position, ...size, desired: slot });
-    return position;
-  });
+    placed.push({ ...position, width: size.width, height: size.height, desired: slot });
+    slots[index] = position; visiting.delete(index);
+  };
+  desired.forEach((_, index) => settle(index));
+  return slots;
 }
 
 /** Ordered, two-dimensional packing. A deep branch grows its container instead
@@ -86,7 +100,7 @@ export function measureShapeCard(node, children, collapsed, depth = 0, compact =
     const saved = custom.positions?.[items[index].id];
     return { x: Math.max(inset, saved?.x ?? slot.x + inset), y: Math.max(header + inset, saved?.y ?? slot.y + header + inset) };
   });
-  const slots = settleShapeSlots(sizes, desired, { gap });
+  const slots = settleShapeSlots(sizes, desired, { gap, ids: items.map((item) => item.id), anchors: custom.anchors, minimum: { x: inset, y: header + inset } });
   width = Math.max(width, ...slots.map((slot, index) => slot.x + sizes[index].width + inset));
   const height = Math.max(header + packed.height + inset * 2, custom.sizes?.[node.id]?.height || 0, ...slots.map((slot, index) => slot.y + sizes[index].height + inset));
   const minimumWidth = Math.max(packed.width + inset * 2, ...slots.map((slot, index) => slot.x + sizes[index].width + inset));

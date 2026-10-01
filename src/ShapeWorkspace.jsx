@@ -18,6 +18,8 @@ import ShapeConnectionPreview from './ShapeConnectionPreview.jsx';
 import TaskFields from './TaskFields.jsx';
 import { useCenteredZoom } from './useCenteredZoom.js';
 import { readableNodeViewport } from './viewport.js';
+import { shapePlacementPatch } from './shapePlacement.js';
+import { placementReferences } from '../lib/placement.mjs';
 import { shapeHistoryEntry, shapeViewHistoryEntry, branchClipboard, pasteBranch, shapeDropTarget, settleShapePosition, assignLensOption, connectionPort, shapeConnectionAtPoint, shapePortPoint, reparentShapePreview } from './shapeEditing.js';
 import './shapeWorkspace.css';
 
@@ -272,6 +274,7 @@ export default function ShapeWorkspace() {
   const [nodes, setNodes] = useState([]);
   const [optimisticGraph, setOptimisticGraph] = useState(null);
   const [viewPositions, setViewPositions] = useState({});
+  const [viewAnchors, setViewAnchors] = useState({});
   const [collapsedIds, setCollapsedIds] = useState(null);
   const [lensSelections, setLensSelections] = useState({});
   const [showActivation, setShowActivation] = useState(false);
@@ -301,6 +304,8 @@ export default function ShapeWorkspace() {
       const positions = next.view.shape.positions || {}; const sizes = next.view.shape.sizes || {};
       setViewPositions((current) => JSON.stringify(current) === JSON.stringify(positions) ? current : positions);
       setViewSizes((current) => JSON.stringify(current) === JSON.stringify(sizes) ? current : sizes);
+      const anchors = next.view.shape.anchors || {};
+      setViewAnchors((current) => JSON.stringify(current) === JSON.stringify(anchors) ? current : anchors);
     }
   }, []);
   const centeredZoom = useCenteredZoom({ canvasRef, minZoom: .06, maxZoom: 2, enabled: Boolean(snapshot) });
@@ -350,6 +355,7 @@ export default function ShapeWorkspace() {
         if (operation.type === 'deleteSubtrees') entry.undoView = { shape: {
           positions: Object.fromEntries(entry.deletedIds.map((id) => [id, before.view?.shape?.positions?.[id] || null])),
           sizes: Object.fromEntries(entry.deletedIds.map((id) => [id, before.view?.shape?.sizes?.[id] || null])),
+          anchors: Object.fromEntries(Object.entries(before.view?.shape?.anchors || {}).filter(([id, anchor]) => entry.deletedIds.includes(id) || placementReferences(anchor).some((ref) => entry.deletedIds.includes(ref)))),
           collapsedIds: collapsedIds || defaultShapeCollapsed(before.graph, currentFocus.id),
         } };
         historyStacks([...undoRef.current, entry].slice(-100), []);
@@ -420,9 +426,9 @@ export default function ShapeWorkspace() {
     setCollapsedIds(next); commitCanvasView({ collapsedIds: next }, { collapsedIds: before });
   }
   const layout = useMemo(() => graph ? shapeLayout(graph, { focusId: currentFocus?.id, mode,
-    positions: viewPositions, sizes: viewSizes, states, onOpen: openNode, onActivate: activateNode, onFocus: focusNode, onToggle: toggleNode, onResize: turnId ? undefined : resizeSection, collapsedIds, reading, showActivation, detailedLinks,
+    positions: viewPositions, sizes: viewSizes, anchors: viewAnchors, states, onOpen: openNode, onActivate: activateNode, onFocus: focusNode, onToggle: toggleNode, onResize: turnId ? undefined : resizeSection, collapsedIds, reading, showActivation, detailedLinks,
     compact: false }) : { nodes: [], edges: [] },
-  [graph, currentFocus?.id, mode, viewPositions, viewSizes, states, openNode, activateNode, focusNode, toggleNode, collapsedIds, reading, showActivation, detailedLinks, turnId]);
+  [graph, currentFocus?.id, mode, viewPositions, viewSizes, viewAnchors, states, openNode, activateNode, focusNode, toggleNode, collapsedIds, reading, showActivation, detailedLinks, turnId]);
   useLayoutEffect(() => setNodes(layout.nodes.map((node) => ({ ...node, selected: selectionIds.includes(node.id),
     className: (filter && node.data.state.status !== filter) || reading[node.id]?.active === false ? 'sm-node-muted' : '' }))), [layout, filter, reading]);
   useLayoutEffect(() => {
@@ -460,6 +466,7 @@ export default function ShapeWorkspace() {
     restoredMap.current = snapshot.mapPath;
     if ((!focusId || focusId === root?.id) && snapshot.view?.shape?.layoutVersion === 3) {
       setViewPositions(snapshot.view.shape.positions || {}); setViewSizes(snapshot.view.shape.sizes || {});
+      setViewAnchors(snapshot.view.shape.anchors || {});
       setCollapsedIds(snapshot.view.shape.collapsedIds || null);
     }
   }, [snapshot]);
@@ -660,12 +667,14 @@ export default function ShapeWorkspace() {
   function editNode(id, tab = 'overview') { nodes.some((node) => node.id === id) ? openNode(id) : showNode(id); setInspectorIntent({ id, tab, edit: tab === 'overview', key: crypto.randomUUID() }); }
   function resizeSection(id, params, phase) {
     if (turnId) return;
-    if (phase === 'start') { setDraggingId(id); resizeBefore.current = { positions: { [id]: snapshotRef.current.view?.shape?.positions?.[id] || null }, sizes: { [id]: snapshotRef.current.view?.shape?.sizes?.[id] || null } }; }
+    if (phase === 'start') { setDraggingId(id); resizeBefore.current = { positions: { [id]: snapshotRef.current.view?.shape?.positions?.[id] || null }, sizes: { [id]: snapshotRef.current.view?.shape?.sizes?.[id] || null }, anchors: snapshotRef.current.view?.shape?.anchors || {} }; }
     else {
       const live = flow.getNodes().map((node) => node.id === id ? { ...node, style: { ...node.style, width: params.width, height: params.height } } : node);
       const parentId = live.find((node) => node.id === id)?.parentId;
-      const position = settleShapePosition(live, id, { x: params.x, y: params.y }, parentId);
-      setDraggingId(null); commitCanvasView({ positions: { [id]: position }, sizes: { [id]: { width: params.width, height: params.height } } }, resizeBefore.current);
+      const position = { x: params.x, y: params.y };
+      const anchors = shapePlacementPatch(live, id, position, parentId, viewAnchors);
+      const before = { ...resizeBefore.current, anchors: Object.fromEntries(Object.keys(anchors).map((key) => [key, resizeBefore.current.anchors[key] || null])) };
+      setDraggingId(null); commitCanvasView({ positions: { [id]: position }, sizes: { [id]: { width: params.width, height: params.height } }, anchors }, before);
     }
   }
   function captureGrab(event) {
@@ -689,18 +698,21 @@ export default function ShapeWorkspace() {
     const absolute = grab ? { x: point.x - grab.x, y: point.y - grab.y } : absoluteShapePosition(live, node.id); const origin = target ? absoluteShapePosition(live, target.id) : { x: 0, y: 0 };
     const desired = target ? { x: Math.max(12, absolute.x - origin.x), y: Math.max((target.data.headerHeight || 40) + 12, absolute.y - origin.y) } : absolute;
     const position = settleShapePosition(live, node.id, desired, target?.id || null);
-    const patch = { positions: { [node.id]: position } }; const before = { positions: { [node.id]: dragBefore.current?.position || null } };
+    const anchors = shapePlacementPatch(live, node.id, position, target?.id || null, viewAnchors);
+    const beforeAnchors = Object.fromEntries(Object.keys(anchors).map((id) => [id, snapshotRef.current.view?.shape?.anchors?.[id] || null]));
+    const patch = { positions: { [node.id]: position }, anchors }; const before = { positions: { [node.id]: dragBefore.current?.position || null }, anchors: beforeAnchors };
     if (parentId !== savedNode.parentId && parentId !== savedNode.id) {
       const oldCollapsed = collapsedIds || defaultShapeCollapsed(graph, currentFocus.id);
-      const preview = reparentShapePreview(graph, live, node.id, parentId, position, oldCollapsed);
+      const preview = reparentShapePreview(graph, live, node.id, parentId, position, oldCollapsed, viewAnchors);
       const undoPositions = Object.fromEntries(Object.keys(preview.positions).map((id) => [id, snapshotRef.current.view?.shape?.positions?.[id] || null]));
-      setOptimisticGraph(preview.graph); setViewPositions((current) => ({ ...current, ...preview.positions })); setCollapsedIds(preview.collapsedIds);
+      const undoAnchors = Object.fromEntries([...new Set([...Object.keys(preview.anchors), ...Object.keys(viewAnchors)])].map((id) => [id, viewAnchors[id] || null]));
+      setOptimisticGraph(preview.graph); setViewPositions((current) => ({ ...current, ...preview.positions })); setViewAnchors(preview.anchors); setCollapsedIds(preview.collapsedIds);
       const saved = await send({ type: 'moveNode', id: node.id, parentId }, {
-        viewPatch: { shape: { layoutVersion: 3, positions: preview.positions, collapsedIds: preview.collapsedIds } },
-        undoView: { shape: { positions: undoPositions, collapsedIds: oldCollapsed } },
+        viewPatch: { shape: { layoutVersion: 3, positions: preview.positions, anchors: preview.anchors, collapsedIds: preview.collapsedIds } },
+        undoView: { shape: { positions: undoPositions, anchors: undoAnchors, collapsedIds: oldCollapsed } },
       });
       setOptimisticGraph(null);
-      if (!saved) { setCollapsedIds(oldCollapsed); setViewPositions(snapshotRef.current.view?.shape?.positions || {}); }
+      if (!saved) { setCollapsedIds(oldCollapsed); setViewPositions(snapshotRef.current.view?.shape?.positions || {}); setViewAnchors(snapshotRef.current.view?.shape?.anchors || {}); }
     } else await commitCanvasView(patch, before);
   }
   function finishConnection(event, state) {

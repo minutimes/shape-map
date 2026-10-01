@@ -137,7 +137,7 @@ disk write, and SSE emission.
 `PUT /api/view` accepts `{ "clientId", "baseRevision", "patch" }`, where the
 patch may contain `positions`, `collapsedIds`, `viewport`,
 `workflow: { collapsedIds?, viewport? }`, or
-`shape: { layoutVersion?: 2 | 3, positions?, sizes?, collapsedIds?, viewport? }`.
+`shape: { layoutVersion?: 2 | 3, positions?, sizes?, anchors?, collapsedIds?, viewport? }`.
 It updates only the non-authoritative
 sibling `*.view.json`, merging position keys for stable IDs. Workflow navigation
 is merged at both nested levels and remains independent of the legacy flat
@@ -178,4 +178,8 @@ See the [facilitation workflow](../skills/shape-map-facilitation/SKILL.md).
 
 `PUT /api/view` also accepts `patch.shape.sizes` keyed by existing IDs with finite
 `{width,height}` in the 168×72 to 30000×30000 range. `null` removes a shape position
-or size override. Spatial changes preserve the source revision and `.mmd` bytes.
+or size override. `patch.shape.anchors` merges placement relationships by ID;
+`null` removes an anchor. Each anchor can contain `x: {id,edge,offset}` (left/right)
+and `y: {ids,edge,offset}` (top/bottom), with finite offsets and existing sibling
+references. Cyclic or cross-parent references return `422` without writing.
+Spatial changes preserve the source revision and `.mmd` bytes.

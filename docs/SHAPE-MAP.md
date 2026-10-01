@@ -160,6 +160,9 @@ for older clients. Upgrading resets outdated composition positions, viewport,
 and folding, preserving legacy editor navigation and all source content.
 It is independent of legacy structure/workflow navigation and contains no semantic
 data. Dragging a composition area repositions its child cards without reparenting.
+Manual placements can also store sibling row and column anchors in the view.
+Nearby sections follow expansion and folding while retaining those authored gaps;
+placement relationships are saved and restored with spatial undo and redo.
 Composition and product views recursively pack cards in ordered horizontal grids.
 Dense containers grow to hold their contents; rough branches keep smaller frames.
 Sequences retain authored order. Deep branches never squeeze descendants narrower
