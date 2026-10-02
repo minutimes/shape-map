@@ -6,24 +6,15 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { freePort, launchBrowser } from './support/browser-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const evidenceDir = path.join(root, 'test-results', 'flow-acceptance');
-const port = Number(process.env.FLOW_QA_PORT || 4342);
+const port = Number(process.env.FLOW_QA_PORT) || await freePort();
 const origin = `http://127.0.0.1:${port}`;
 const report = { origin, checks: {}, screenshots: {}, timings: {} };
 const diagnostics = [];
 let server; let browser;
-
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundled = chromium.executablePath();
-  const match = bundled.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundled;
-  const candidate = path.join(match[1], `chromium_headless_shell-${match[2]}`, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
-  try { await fs.access(candidate); return candidate; } catch { return bundled; }
-}
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 async function waitUntil(check, { timeoutMs = 6000, intervalMs = 40, message = 'condition timed out' } = {}) {
@@ -98,7 +89,7 @@ async function selectStep(page, id) {
 async function run() {
   await fs.mkdir(evidenceDir, { recursive: true });
   await startServer();
-  browser = await chromium.launch({ executablePath: await headlessShellPath() });
+  browser = await launchBrowser();
   report.browser = browser.version();
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   const page = await context.newPage();

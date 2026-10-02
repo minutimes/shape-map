@@ -7,7 +7,7 @@
  * breaks after opening, the system flow tab, and three screen sizes.
  * Run `npm run build` first. Screenshots go to test-results/flow-project/.
  *
- *   FLOW_ACCEPTANCE_PORT=4343 node scripts/flow-project-acceptance.mjs
+ *   node scripts/flow-project-acceptance.mjs   (a free port; FLOW_ACCEPTANCE_PORT pins one)
  *   FLOW_ACCEPTANCE_EXTRA="/path/a.mmd:system-flow,/path/b.mmd:user-flow"
  *     (optional; real maps copied into the temporary project only and
  *      converted there: a header, legends, and note links turned into descriptions)
@@ -17,10 +17,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { freePort, launchBrowser } from './support/browser-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.env.FLOW_ACCEPTANCE_PORT || 4343);
+const port = Number(process.env.FLOW_ACCEPTANCE_PORT) || await freePort();
 const origin = `http://127.0.0.1:${port}`;
 const shots = path.join(root, 'test-results', 'flow-project');
 const results = [];
@@ -43,15 +43,6 @@ async function until(fn, { timeout = 8000, message = 'timed out' } = {}) {
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
 }
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundled = chromium.executablePath();
-  const match = bundled.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundled;
-  const candidate = path.join(match[1], `chromium_headless_shell-${match[2]}`, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
-  return fs.access(candidate).then(() => candidate, () => bundled);
-}
-
 /** Makes a common Mermaid flowchart editable: header, legends, and `-.-` notes as descriptions. */
 export function prepareFlowSource(text, kind, title) {
   let lines = text.replace(/\r\n/g, '\n').split('\n');
@@ -146,7 +137,7 @@ async function run() {
   await fs.mkdir(shots, { recursive: true });
   const workspace = await makeWorkspace();
   const server = await startServer({ SHAPE_MAP_WORKSPACE_ROOT: workspace.workspaceRoot, SHAPE_MAP_STATE_DIR: path.join(workspace.temporary, 'state') });
-  const browser = await chromium.launch({ executablePath: await headlessShellPath() });
+  const browser = await launchBrowser();
   const errors = [];
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });

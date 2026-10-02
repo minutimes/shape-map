@@ -1,35 +1,20 @@
+#!/usr/bin/env node
+/*
+ * Browser check for card sizing in the hierarchy editor (`?editor=1`):
+ * startup overlap arrangement, move undo/redo, a growing inline editor, fit
+ * width, corner and edge resizing (the released size stays on screen while it
+ * saves), the 720px maximum, batch wrap/fixed layouts written to Mermaid, and
+ * the layout panel at phone width. Evidence: test-results/node-layout/.
+ */
 import fs from 'node:fs/promises';
-import net from 'node:net';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { assert, cardOverlap, evidenceDir as makeEvidenceDir, launchBrowser, root, startServer } from './support/browser-check.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const evidenceDir = path.join(root, 'test-results', 'node-layout');
-const mapPath = path.join(evidenceDir, 'node-layout-fixture.mmd');
+let evidenceDir;
+let mapPath;
 let server;
 let browser;
 let origin;
-
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundledPath = chromium.executablePath();
-  const match = bundledPath.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundledPath;
-  const candidate = path.join(
-    match[1],
-    `chromium_headless_shell-${match[2]}`,
-    'chrome-headless-shell-mac-arm64',
-    'chrome-headless-shell',
-  );
-  try {
-    await fs.access(candidate);
-    return candidate;
-  } catch {
-    return bundledPath;
-  }
-}
 
 function fixtureSource() {
   return `flowchart LR
@@ -50,26 +35,6 @@ function fixtureSource() {
 
   %% mlc-legend: stage|단계|카드 배치와 크기 검증
 `;
-}
-
-async function freePort() {
-  const probe = net.createServer();
-  await new Promise((resolve, reject) => probe.listen(0, '127.0.0.1', resolve).once('error', reject));
-  const port = probe.address().port;
-  await new Promise((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
-  return port;
-}
-
-async function waitForServer() {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      if ((await fetch(`${origin}/api/health`)).ok) return;
-    } catch {
-      // The isolated server is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error('Node layout fixture server did not start.');
 }
 
 async function snapshot() {
@@ -95,31 +60,9 @@ async function waitForEnabled(locator, label) {
   throw new Error(`${label} did not become enabled.`);
 }
 
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
 async function visibleMetrics(page) {
-  return page.locator('.react-flow__node').evaluateAll((elements) => {
-    const nodes = elements.map((element) => {
-      const rect = element.getBoundingClientRect();
-      return { id: element.dataset.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-    });
-    const overlapPairs = [];
-    for (let left = 0; left < nodes.length; left += 1) {
-      for (let right = left + 1; right < nodes.length; right += 1) {
-        const a = nodes[left];
-        const b = nodes[right];
-        if (
-          a.x < b.x + b.width - 0.5
-          && a.x + a.width > b.x + 0.5
-          && a.y < b.y + b.height - 0.5
-          && a.y + a.height > b.y + 0.5
-        ) overlapPairs.push([a.id, b.id]);
-      }
-    }
-    return { nodes, overlapPairs };
-  });
+  const { nodes, overlapPairs } = await cardOverlap(page);
+  return { nodes, overlapPairs };
 }
 
 async function dragSelect(page, ids) {
@@ -140,8 +83,8 @@ async function dragSelect(page, ids) {
 }
 
 async function run() {
-  await fs.rm(evidenceDir, { recursive: true, force: true });
-  await fs.mkdir(evidenceDir, { recursive: true });
+  evidenceDir = await makeEvidenceDir('node-layout');
+  mapPath = path.join(evidenceDir, 'node-layout-fixture.mmd');
   await fs.writeFile(mapPath, fixtureSource(), 'utf8');
   const initialPositions = {
     root: { x: 40, y: 220 },
@@ -156,22 +99,10 @@ async function run() {
     viewport: { x: 0, y: 0, zoom: 1 },
   }, null, 2)}\n`, 'utf8');
 
-  const port = await freePort();
-  origin = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, ['server/index.mjs'], {
-    cwd: root,
-    env: {
-      ...process.env,
-      FINAL_SHAPE_MAP_PORT: String(port),
-      FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir,
-      FINAL_SHAPE_MAP_PATH: path.basename(mapPath),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await waitForServer();
-
-  browser = await chromium.launch({ executablePath: await headlessShellPath(), headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  server = await startServer({ FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir, FINAL_SHAPE_MAP_PATH: path.basename(mapPath) });
+  origin = server.origin;
+  browser = await launchBrowser();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   const page = await context.newPage();
   await page.goto(`${origin}?editor=1`, { waitUntil: 'networkidle' });
@@ -299,7 +230,18 @@ async function run() {
   `Resize moved an unrelated ancestor: ${JSON.stringify({ before: beforeResizeById.root, live: firstLiveById.root })}`);
   assert(firstLiveMetrics.overlapPairs.length === 0,
     `First live resize left cards overlapping: ${JSON.stringify(firstLiveMetrics.overlapPairs)}`);
+  // Hold the save briefly: the released size must stay on screen while it is
+  // in flight instead of snapping back to the old size.
+  let releaseSave;
+  const saveHeld = new Promise((resolve) => { releaseSave = resolve; });
+  await page.route('**/api/mutations', async (route) => { await saveHeld; await route.continue(); }, { times: 1 });
   await page.mouse.up();
+  await page.waitForTimeout(200);
+  const inFlightGeometry = await page.getByTestId('node-a').boundingBox();
+  releaseSave();
+  assert(Math.abs(inFlightGeometry.width - liveResizeGeometry.card.width) <= 1
+    && Math.abs(inFlightGeometry.height - liveResizeGeometry.card.height) <= 1,
+  `Card snapped back while its resize was saving: ${JSON.stringify({ liveResizeGeometry, inFlightGeometry })}`);
   const resized = await waitForSnapshot(
     (current) => current.graph.nodes.find((node) => node.id === 'a')?.layout?.mode === 'fixed',
     'diagonal card resize',
@@ -500,13 +442,17 @@ async function run() {
   const desktopScreenshot = path.join(evidenceDir, 'batch-fixed-desktop.png');
   await page.screenshot({ path: desktopScreenshot, fullPage: true });
 
-  await page.setViewportSize({ width: 390, height: 820 });
-  await page.waitForTimeout(100);
-  const mobileScreenshot = path.join(evidenceDir, 'layout-panel-390.png');
-  await page.screenshot({ path: mobileScreenshot, fullPage: true });
-  const panelBox = await page.getByTestId('inspector').boundingBox();
-  assert(panelBox && panelBox.x >= 0 && panelBox.x + panelBox.width <= 390,
-    `Mobile layout panel is clipped: ${JSON.stringify(panelBox)}`);
+  const panelScreenshots = [];
+  for (const [width, height] of [[1024, 768], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(150);
+    const file = path.join(evidenceDir, `layout-panel-${width}.png`);
+    await page.screenshot({ path: file, fullPage: true });
+    panelScreenshots.push(file);
+    const panelBox = await page.getByTestId('inspector').boundingBox();
+    assert(panelBox && panelBox.x >= 0 && panelBox.x + panelBox.width <= width,
+      `Layout panel is clipped at ${width}px: ${JSON.stringify(panelBox)}`);
+  }
 
   const report = {
     overlap: { initialPairs: [['a', 'b'], ['a1', 'b1']], finalPairs: arrangedMetrics.overlapPairs },
@@ -518,6 +464,7 @@ async function run() {
       resizeLineCount,
       resizedLayout,
       liveResizeGeometry,
+      inFlightGeometry,
       savedResizeGeometry,
       maximumReverse: {
         maximumLiveWidth,
@@ -545,7 +492,7 @@ async function run() {
       path.relative(root, liveResizeScreenshot),
       path.relative(root, savedResizeScreenshot),
       path.relative(root, desktopScreenshot),
-      path.relative(root, mobileScreenshot),
+      ...panelScreenshots.map((file) => path.relative(root, file)),
     ],
   };
   await fs.writeFile(path.join(evidenceDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
@@ -556,9 +503,5 @@ try {
   await run();
 } finally {
   await browser?.close().catch(() => {});
-  if (server && server.exitCode === null) {
-    const exited = new Promise((resolve) => server.once('exit', resolve));
-    server.kill('SIGTERM');
-    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
-  }
+  await server?.stop().catch(() => {});
 }

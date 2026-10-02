@@ -1,65 +1,28 @@
+#!/usr/bin/env node
+/*
+ * Browser check for the detailed hierarchy editor (`?editor=1`) on a copy of
+ * maps/demo.mmd: direct editing, keyboard creation, branch drag, copy/cut/paste,
+ * selection, navigation, folding, restart persistence, external and invalid
+ * source, a stale-edit conflict, and the toolbar at three widths.
+ * Evidence: test-results/hierarchy-editor/.
+ */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import {
+  assert, cardOverlap, evidenceDir as makeEvidenceDir, launchBrowser, root, startServer, waitUntil as baseWaitUntil,
+} from './support/browser-check.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const evidenceDir = path.join(root, 'test-results', 'browser-acceptance');
-const mapPath = path.join(evidenceDir, 'map.mmd');
-const relativeMapPath = path.relative(root, mapPath);
-const port = Number(process.env.FINAL_SHAPE_MAP_QA_PORT || process.env.MLC_QA_PORT || 4328);
-const origin = `http://127.0.0.1:${port}`;
-let chromePath;
-
+let evidenceDir;
+let mapPath;
+let origin;
 let server;
 let browser;
-const report = {
-  browser: null,
-  origin,
-  checks: {},
-  screenshots: {},
-};
+let page;
+const report = { checks: {}, screenshots: {} };
 const browserDiagnostics = [];
 
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundledPath = chromium.executablePath();
-  const match = bundledPath.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundledPath;
-  const candidate = path.join(
-    match[1],
-    `chromium_headless_shell-${match[2]}`,
-    'chrome-headless-shell-mac-arm64',
-    'chrome-headless-shell',
-  );
-  try {
-    await fs.access(candidate);
-    return candidate;
-  } catch {
-    return bundledPath;
-  }
-}
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-async function waitUntil(check, { timeoutMs = 5000, intervalMs = 35, message = 'condition timed out' } = {}) {
-  const deadline = performance.now() + timeoutMs;
-  let lastError;
-  while (performance.now() < deadline) {
-    try {
-      const value = await check();
-      if (value) return value;
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`${message}${lastError ? `: ${lastError.message}` : ''}`);
-}
+const waitUntil = (check, { timeoutMs = 5000, intervalMs = 35, message } = {}) => baseWaitUntil(check, { timeoutMs, intervalMs, message });
 
 async function snapshot() {
   const response = await fetch(`${origin}/api/map`);
@@ -67,7 +30,7 @@ async function snapshot() {
   return response.json();
 }
 
-async function mutate(operation, clientId = 'browser-acceptance-external') {
+async function mutate(operation, clientId = 'hierarchy-editor-external') {
   const current = await snapshot();
   const response = await fetch(`${origin}/api/mutations`, {
     method: 'POST',
@@ -85,6 +48,28 @@ async function waitForNode(id, predicate, message) {
     const node = current.graph.nodes.find((item) => item.id === id);
     return node && predicate(node, current) ? { node, current } : false;
   }, { message });
+}
+
+// The inspector has two 저장 buttons: the name form and the detail form.
+function renameSaveButton(targetPage) {
+  return targetPage.locator('form', { has: targetPage.getByTestId('rename-input') }).getByRole('button', { name: '저장', exact: true });
+}
+
+// Waits until the editor is idle and no card moves between two frames apart.
+async function settleCanvas(targetPage) {
+  await waitUntil(() => targetPage.getByTestId('add-root-child-button').isEnabled(), { message: 'Editor did not become idle' });
+  const boxes = () => targetPage.locator('.react-flow__node').evaluateAll((nodes) => JSON.stringify(nodes.map((node) => {
+    const rect = node.getBoundingClientRect();
+    return [node.dataset.id, Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)];
+  })));
+  let previous = await boxes();
+  await waitUntil(async () => {
+    await targetPage.waitForTimeout(150);
+    const current = await boxes();
+    const stable = current === previous;
+    previous = current;
+    return stable;
+  }, { message: 'Canvas did not settle' });
 }
 
 async function openInspectorFor(targetPage, id) {
@@ -120,80 +105,29 @@ async function arrangeAndFit(targetPage) {
 }
 
 async function visibleNodeOverlap(page) {
-  const nodeRects = await page.locator('.react-flow__node').evaluateAll((nodes) => nodes.map((node) => {
-    const rect = node.getBoundingClientRect();
-    return { id: node.getAttribute('data-id'), x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-  }));
-  const overlapPairs = [];
-  for (let left = 0; left < nodeRects.length; left += 1) {
-    for (let right = left + 1; right < nodeRects.length; right += 1) {
-      const a = nodeRects[left];
-      const b = nodeRects[right];
-      const overlap = a.x < b.x + b.width - 0.5
-        && a.x + a.width > b.x + 0.5
-        && a.y < b.y + b.height - 0.5
-        && a.y + a.height > b.y + 0.5;
-      if (overlap) overlapPairs.push([a.id, b.id]);
-    }
-  }
-  return { nodeCount: nodeRects.length, overlapPairs };
-}
-
-async function startServer() {
-  server = spawn(process.execPath, ['server/index.mjs'], {
-    cwd: root,
-    env: {
-      ...process.env,
-      FINAL_SHAPE_MAP_PORT: String(port),
-      FINAL_SHAPE_MAP_PATH: relativeMapPath,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let serverLog = '';
-  server.stdout.on('data', (chunk) => { serverLog += chunk; });
-  server.stderr.on('data', (chunk) => { serverLog += chunk; });
-  server.once('exit', (code) => {
-    if (code && code !== 0) process.stderr.write(serverLog);
-  });
-  await waitUntil(async () => {
-    try {
-      return (await fetch(`${origin}/api/health`)).ok;
-    } catch {
-      return false;
-    }
-  }, { timeoutMs: 8000, message: `server did not start on ${origin}` });
-}
-
-async function stopServer() {
-  if (!server || server.exitCode !== null) return;
-  const exited = new Promise((resolve) => server.once('exit', resolve));
-  server.kill('SIGTERM');
-  await Promise.race([
-    exited,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('server stop timed out')), 5000)),
-  ]);
+  const { nodeCount, overlapPairs } = await cardOverlap(page);
+  return { nodeCount, overlapPairs };
 }
 
 async function run() {
-  await fs.rm(evidenceDir, { recursive: true, force: true });
-  await fs.mkdir(evidenceDir, { recursive: true });
+  evidenceDir = await makeEvidenceDir('hierarchy-editor');
+  mapPath = path.join(evidenceDir, 'map.mmd');
   await fs.copyFile(path.join(root, 'maps', 'demo.mmd'), mapPath);
-  await startServer();
-
-  chromePath = await headlessShellPath();
-  report.browser = chromePath;
-  browser = await chromium.launch({ executablePath: chromePath, headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+  server = await startServer({ FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir, FINAL_SHAPE_MAP_PATH: 'map.mmd' });
+  origin = server.origin;
+  browser = await launchBrowser();
+  report.browser = browser.version();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
-  const page = await context.newPage();
+  page = await context.newPage();
   page.on('pageerror', (error) => browserDiagnostics.push(`pageerror:${error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') browserDiagnostics.push(`console:${message.text()}`);
   });
   await page.goto(`${origin}?editor=1`, { waitUntil: 'networkidle' });
   await page.getByTestId('node-direction').waitFor();
-  assert(await page.getByRole('heading', { name: 'Final shape map', exact: true }).isVisible(),
+  assert(await page.getByRole('heading', { name: 'Shape map', exact: true }).isVisible(),
     'Product title is not visible.');
   assert(await page.getByText('영상 설계 지도', { exact: true }).isVisible(), 'Korean root label is not visible.');
   assert(await page.getByTestId('legend').isVisible(), 'Legend is not visible.');
@@ -214,9 +148,9 @@ async function run() {
   report.checks.initialRender = { productTitle: true, visualMetrics };
   await page.keyboard.press('Control+0');
   await page.waitForTimeout(220);
-  const overviewPath = path.join(evidenceDir, 'default-overview-1280.png');
+  const overviewPath = path.join(evidenceDir, 'default-overview-1440.png');
   await page.screenshot({ path: overviewPath, fullPage: true });
-  report.screenshots.defaultOverview = { path: path.relative(root, overviewPath), viewportWidth: 1280 };
+  report.screenshots.defaultOverview = { path: path.relative(root, overviewPath), viewportWidth: 1440 };
 
   // Canvas overlays collapse into one icon each, persist through reload, and
   // expand back into their original corners.
@@ -224,7 +158,7 @@ async function run() {
   await page.getByTestId('minimap-collapse-button').click();
   await page.getByTestId('legend').waitFor({ state: 'detached' });
   await page.getByTestId('rf__minimap').waitFor({ state: 'detached' });
-  const compactOverlaysPath = path.join(evidenceDir, 'compact-overlays-1280.png');
+  const compactOverlaysPath = path.join(evidenceDir, 'compact-overlays-1440.png');
   await page.screenshot({ path: compactOverlaysPath, fullPage: true });
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('legend-expand-button').waitFor({ state: 'visible' });
@@ -240,7 +174,7 @@ async function run() {
   };
   report.screenshots.compactOverlays = {
     path: path.relative(root, compactOverlaysPath),
-    viewportWidth: 1280,
+    viewportWidth: 1440,
   };
 
   // Direct visual add, rename, presentation edit, and semantic reparent.
@@ -266,9 +200,9 @@ async function run() {
     inspector: inspectorCopiedNodeKey,
     rawStableId: true,
   };
-  const editorPath = path.join(evidenceDir, 'explicit-editor-1280.png');
+  const editorPath = path.join(evidenceDir, 'explicit-editor-1440.png');
   await page.screenshot({ path: editorPath, fullPage: true });
-  report.screenshots.explicitEditor = { path: path.relative(root, editorPath), viewportWidth: 1280 };
+  report.screenshots.explicitEditor = { path: path.relative(root, editorPath), viewportWidth: 1440 };
   await page.getByTestId('new-child-input').fill('브라우저 추가');
   await page.getByTestId('add-child-button').click();
   const added = await waitUntil(async () => {
@@ -279,7 +213,7 @@ async function run() {
   const addedId = added.node.id;
   await page.getByTestId(`node-${addedId}`).waitFor({ state: 'visible' });
   await page.getByTestId('rename-input').fill('브라우저 이름 변경');
-  await page.getByRole('button', { name: '저장', exact: true }).click();
+  await renameSaveButton(page).click();
   await waitForNode(addedId, (node) => node.label === '브라우저 이름 변경', 'Visual rename did not save');
 
   await page.getByTestId('shape-rounded').click();
@@ -368,6 +302,10 @@ async function run() {
   };
 
   // Dragging a parent moves every descendant by the exact same canvas delta.
+  // The camera follows the last edit; fit the whole map so the branch is in
+  // view, and measure only once the outdent's rearrangement has settled.
+  await page.keyboard.press('Control+0');
+  await settleCanvas(page);
   const branchIds = ['stages', 'stage1', 'stage15', tabChild.id];
   const beforeBranchSnapshot = await snapshot();
   const beforeBranchPositions = Object.fromEntries(branchIds.map((id) => [
@@ -380,6 +318,9 @@ async function run() {
   ])));
   assert(branchIds.every((id) => beforeBranchBoxes[id]), 'A branch node was unavailable before drag.');
   const branchRootBox = beforeBranchBoxes.stages;
+  const grabTarget = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-testid^="node-"]')?.dataset.testid,
+    { x: branchRootBox.x + branchRootBox.width / 2, y: branchRootBox.y + branchRootBox.height / 2 });
+  assert(grabTarget === 'node-stages', `The branch card is not under the pointer before the drag: ${grabTarget}`);
   await page.mouse.move(branchRootBox.x + branchRootBox.width / 2, branchRootBox.y + branchRootBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(
@@ -535,14 +476,15 @@ async function run() {
   await openInspectorFor(page, 'planning');
   const renameInput = page.getByTestId('rename-input');
   await renameInput.click();
-  await page.keyboard.press('Meta+A');
+  // The platform's own select-all: Cmd+A on macOS, Ctrl+A elsewhere.
+  await page.keyboard.press('ControlOrMeta+A');
   const textSelection = await renameInput.evaluate((input) => ({
     start: input.selectionStart,
     end: input.selectionEnd,
     length: input.value.length,
   }));
   assert(textSelection.start === 0 && textSelection.end === textSelection.length,
-    'Meta+A was intercepted while a text input was focused.');
+    'Select-all was intercepted while a text input was focused.');
   report.checks.inputShortcutIsolation = textSelection;
 
   // Keyboard and pointer zoom/pan remain on the canvas.
@@ -640,8 +582,7 @@ async function run() {
   const collapsedAllOverlap = await visibleNodeOverlap(page);
   assert(collapsedAllOverlap.overlapPairs.length === 0,
     `Global collapse left overlaps: ${JSON.stringify(collapsedAllOverlap.overlapPairs)}`);
-  await stopServer();
-  await startServer();
+  await server.restart();
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('expand-all-button').waitFor();
   const restartedCollapsedIds = [...(await snapshot()).view.collapsedIds].sort();
@@ -659,13 +600,13 @@ async function run() {
   const expandedAllOverlap = await visibleNodeOverlap(page);
   assert(expandedAllOverlap.overlapPairs.length === 0,
     `Global expand left overlaps: ${JSON.stringify(expandedAllOverlap.overlapPairs)}`);
-  const expandedAllPath = path.join(evidenceDir, 'all-branches-expanded-1280.png');
+  const expandedAllPath = path.join(evidenceDir, 'all-branches-expanded-1440.png');
   await page.keyboard.press('Control+0');
   await page.waitForTimeout(260);
   await page.screenshot({ path: expandedAllPath, fullPage: true });
   report.screenshots.allBranchesExpanded = {
     path: path.relative(root, expandedAllPath),
-    viewportWidth: 1280,
+    viewportWidth: 1440,
   };
   report.checks.globalCollapseExpandPersistence = {
     collapsedBranchCount: expectedCollapsedIds.length,
@@ -709,7 +650,7 @@ async function run() {
   await mutate({ type: 'renameNode', id: 'original', label: '외부 충돌 변경' });
   await openInspectorFor(stalePage, 'original');
   await stalePage.getByTestId('rename-input').fill('오래된 화면 변경');
-  await stalePage.getByRole('button', { name: '저장' }).click();
+  await renameSaveButton(stalePage).click();
   await stalePage.getByTestId('conflict-banner').waitFor({ state: 'visible', timeout: 5000 });
   const afterConflict = await snapshot();
   assert(afterConflict.graph.nodes.find((node) => node.id === 'original').label === '외부 충돌 변경',
@@ -723,7 +664,7 @@ async function run() {
     .waitFor({ state: 'visible', timeout: 5000 });
   await openInspectorFor(page, 'planning');
   await page.getByTestId('rename-input').fill('실행 취소 후보');
-  await page.getByRole('button', { name: '저장', exact: true }).click();
+  await renameSaveButton(page).click();
   await waitForNode('planning', (node) => node.label === '실행 취소 후보', 'UI rename for undo test did not save');
   await waitUntil(async () => page.getByTestId('undo-button').isEnabled(), {
     message: 'Undo was not enabled after a local edit',
@@ -741,8 +682,7 @@ async function run() {
   await waitUntil(async () => (await snapshot()).view.collapsedIds.includes('shortform'), {
     message: 'Collapsed state did not persist to the view sidecar',
   });
-  await stopServer();
-  await startServer();
+  await server.restart();
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('toggle-shortform').waitFor();
   assert((await page.getByTestId('toggle-shortform').getAttribute('aria-expanded')) === 'false',
@@ -767,8 +707,8 @@ async function run() {
   report.checks.restartPersistence = true;
 
   // Responsive visual evidence and explicit clipping bounds.
-  for (const width of [390, 768, 1280]) {
-    await page.setViewportSize({ width, height: 820 });
+  for (const [width, height] of [[390, 844], [1024, 768], [1440, 900]]) {
+    await page.setViewportSize({ width, height });
     await page.keyboard.press('Control+0');
     await page.waitForTimeout(220);
     await page.getByTestId('node-planning').click();
@@ -785,12 +725,14 @@ async function run() {
       button.x >= 0 && button.right <= width && button.height >= 40 && button.height <= 48
     )),
       `Toolbar target is clipped or undersized at ${width}px: ${JSON.stringify(topbarButtons)}`);
-    const overlayControls = await page.locator('[data-testid="legend-collapse-button"], [data-testid="minimap-collapse-button"]').evaluateAll((buttons) => buttons.map((button) => {
+    // Phone widths start with the minimap folded, so each overlay has one toggle in either state.
+    const overlayControls = await page.locator(['legend-collapse-button', 'legend-expand-button', 'minimap-collapse-button', 'minimap-expand-button']
+      .map((id) => `[data-testid="${id}"]`).join(', ')).evaluateAll((buttons) => buttons.map((button) => {
       const rect = button.getBoundingClientRect();
       return { label: button.getAttribute('aria-label'), x: rect.x, right: rect.right, y: rect.y, bottom: rect.bottom, width: rect.width, height: rect.height };
     }));
     assert(overlayControls.length === 2 && overlayControls.every((button) => (
-      button.x >= 0 && button.right <= width && button.y >= 0 && button.bottom <= 820
+      button.x >= 0 && button.right <= width && button.y >= 0 && button.bottom <= height
       && button.width >= 30 && button.height >= 30
     )), `Canvas overlay control is clipped at ${width}px: ${JSON.stringify(overlayControls)}`);
     const screenshotPath = path.join(evidenceDir, `${width}.png`);
@@ -812,7 +754,11 @@ async function run() {
 
 try {
   await run();
+} catch (error) {
+  await page?.screenshot({ path: path.join(evidenceDir, 'failure.png') }).catch(() => {});
+  if (browserDiagnostics.length) error.message += `\nbrowser: ${browserDiagnostics.join(' | ')}`;
+  throw error;
 } finally {
   await browser?.close().catch(() => {});
-  await stopServer().catch(() => {});
+  await server?.stop().catch(() => {});
 }
