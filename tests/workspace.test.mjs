@@ -162,7 +162,7 @@ describe('project map routes', () => {
     const original = await fs.readFile(file, 'utf8');
     const snapshot = (await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body;
     expect(snapshot).toMatchObject({ kind: 'user-flow', editable: true, source: original, mapPath: 'docs/maps/02-lending.mmd', sourceStatus: { valid: true, error: null } });
-    expect(snapshot.view).toBeUndefined();
+    expect(snapshot.view).toEqual({ flow: { positions: {} } });
     expect(snapshot.graph.lanes[0]).toEqual({ id: 'reader', title: '빌리는 사람', tags: ['consumer'] });
     const added = (await request(app).post(`/api/mutations?${q('02-lending.mmd')}`).send({ baseRevision: snapshot.revision, clientId: 'flow',
       operation: { type: 'addStep', lane: 'reader', label: '알림 끄기', after: 'reader_wait' } }).expect(200)).body;
@@ -187,8 +187,55 @@ describe('project map routes', () => {
     for (const route of [`/api/brief?${q('02-lending.mmd')}`, `/api/subtree/reader?${q('02-lending.mmd')}`]) {
       expect((await request(app).get(route).expect(422)).body.code).toBe('unsupported_map_kind');
     }
-    expect((await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: undone.revision, clientId: 'flow', patch: {} }).expect(422)).body.code).toBe('unsupported_map_kind');
+    expect((await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: undone.revision, clientId: 'flow', patch: {} }).expect(200)).body.revision).toBe(undone.revision);
     expect((await request(app).get(`/api/repository?${q('02-lending.mmd')}`).expect(200)).body.connected).toBe(true);
+  });
+
+  it('keeps hand-placed flow cards as view state outside the project, filtered when a step is gone', async () => {
+    const file = path.join(sample, 'docs/maps/02-lending.mmd');
+    const original = await fs.readFile(file, 'utf8');
+    const viewFile = path.join(stateDir, 'projects', 'sample', '02-lending.view.json');
+    const snapshot = (await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body;
+    const placed = (await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: snapshot.revision, clientId: 'canvas',
+      patch: { flow: { positions: { owner_check: { x: 820, y: 140 }, reader_wait: { x: 300.5, y: 12 } } } } }).expect(200)).body;
+    expect(placed).toMatchObject({ revision: snapshot.revision, origin: 'canvas', view: { flow: { positions: { owner_check: { x: 820, y: 140 }, reader_wait: { x: 300.5, y: 12 } } } } });
+    expect(await fs.readFile(file, 'utf8')).toBe(original);
+    expect(JSON.parse(await fs.readFile(viewFile, 'utf8'))).toEqual(placed.view);
+    expect(git(sample, 'status', '--porcelain')).not.toContain('view.json');
+
+    // Merged by step ID; null restores automatic placement.
+    const merged = (await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: snapshot.revision, clientId: 'canvas',
+      patch: { flow: { positions: { reader_wait: null, owner_accept: { x: 0, y: 0 } } } } }).expect(200)).body;
+    expect(merged.view.flow.positions).toEqual({ owner_check: { x: 820, y: 140 }, owner_accept: { x: 0, y: 0 } });
+
+    // Invalid patches change nothing.
+    for (const patch of [{ flow: { positions: { nowhere: { x: 1, y: 1 } } } }, { flow: { positions: { owner_check: { x: -1, y: 0 } } } },
+      { flow: { positions: { owner_check: { x: 1, y: 2, z: 3 } } } }, { flow: { zoom: 1 } }, { shape: {} }, { flow: { positions: [] } }]) {
+      expect((await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: snapshot.revision, clientId: 'canvas', patch }).expect(422)).body.code).toBe('validation_error');
+    }
+    expect((await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: 'stale', clientId: 'canvas',
+      patch: { flow: { positions: { owner_check: null } } } }).expect(409)).body.code).toBe('revision_conflict');
+    expect(JSON.parse(await fs.readFile(viewFile, 'utf8'))).toEqual(merged.view);
+
+    // Placement survives a content edit and a reopen; a deleted step drops its placement.
+    const moved = (await request(app).post(`/api/mutations?${q('02-lending.mmd')}`).send({ baseRevision: snapshot.revision, clientId: 'flow',
+      operation: { type: 'moveStep', id: 'owner_check', lane: 'reader' } }).expect(200)).body;
+    expect(moved.view.flow.positions.owner_check).toEqual({ x: 820, y: 140 });
+    const deleted = (await request(app).post(`/api/mutations?${q('02-lending.mmd')}`).send({ baseRevision: moved.revision, clientId: 'flow',
+      operation: { type: 'deleteSteps', ids: ['owner_accept'] } }).expect(200)).body;
+    expect(deleted.view.flow.positions).toEqual({ owner_check: { x: 820, y: 140 } });
+    expect(JSON.parse(await fs.readFile(viewFile, 'utf8')).flow.positions).toEqual({ owner_check: { x: 820, y: 140 } });
+    await workspace.close();
+    workspace = await createWorkspace({ root, stateDir, watchFiles: false });
+    app = createApiApp(legacy, { workspace });
+    const reopened = (await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body;
+    expect(reopened.view).toEqual({ flow: { positions: { owner_check: { x: 820, y: 140 } } } });
+    // A view file edited by hand is filtered on read: unknown steps and invalid values are dropped.
+    await fs.writeFile(viewFile, JSON.stringify({ flow: { positions: { owner_check: { x: 5, y: 6 }, ghost: { x: 1, y: 1 }, reader_open: { x: 'a', y: 1 } } }, shape: { positions: {} } }));
+    await workspace.close();
+    workspace = await createWorkspace({ root, stateDir, watchFiles: false });
+    app = createApiApp(legacy, { workspace });
+    expect((await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body.view).toEqual({ flow: { positions: { owner_check: { x: 5, y: 6 } } } });
   });
 
   it('lets replaceSource switch between the two flow kinds, which moves the map to the other tab', async () => {
