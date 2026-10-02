@@ -173,6 +173,12 @@ proposals, human review, recorded turns, the four colors, and **AI와 논의** /
 each link opens the feature, and a feature lists the steps that use it. Links are
 stored in the flow file, never inferred.
 
+Flow cards start in an automatic layout and can be dragged anywhere. A placed
+card keeps its spot (saved in `.state/`, not in the file), the other cards make
+room, and arrows route around cards. Dropping a card on another lane moves the
+step to that lane in the file. Undo covers both, and **자동 자리로** or
+**모두 자동 배치** returns cards to the automatic layout.
+
 ## Development
 
 ```sh

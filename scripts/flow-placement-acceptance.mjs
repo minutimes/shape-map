@@ -159,11 +159,22 @@ async function run() {
   const browser = await chromium.launch({ executablePath: await headlessShellPath() });
   const errors = [];
   const lendingFile = path.join(workspace.maps, '02-lending.mmd');
-  const original = await fs.readFile(lendingFile, 'utf8');
+  const pristine = await fs.readFile(lendingFile, 'utf8');
+  let original = pristine;
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
     page.on('pageerror', (error) => errors.push(error.message));
+    // A memo and a proposal give one card a review color and badges, which must move with it.
+    for (const operation of [{ type: 'addComment', id: 'owner_handover', body: '건네는 장소를 정해야 해요', kind: 'concern', author: '기획' },
+      { type: 'setProposal', id: 'owner_handover', proposal: { reason: '직접 만나지 않고 보관함에 맡기기' } }]) {
+      const current = await (await fetch(`${origin}/api/map?project=bookshelf&map=02-lending.mmd`)).json();
+      const response = await fetch(`${origin}/api/mutations?project=bookshelf&map=02-lending.mmd`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseRevision: current.revision, clientId: 'acceptance', operation }) });
+      if (!response.ok) throw new Error(`setup ${operation.type} failed: ${await response.text()}`);
+    }
+    original = await fs.readFile(lendingFile, 'utf8');
+    if (original === pristine) throw new Error('setup did not change the map');
     await page.goto(`${origin}/?project=bookshelf&map=02-lending.mmd`);
     await page.locator('.react-flow__node[data-id="reader_open"]').waitFor();
     await page.getByRole('button', { name: '지도 전체 보기' }).click();
@@ -180,6 +191,9 @@ async function run() {
     const placedAt = await flowPosition(page, 'owner_handover');
     check('a card dragged inside its lane stays where it was dropped', placedAt.y > before.y + 35 && Math.abs(placedAt.x - before.x) < 2, JSON.stringify({ before, placedAt }));
     check('placement never touches the map file', (await fs.readFile(lendingFile, 'utf8')) === original);
+    const marks = page.getByTestId('fm-step-owner_handover');
+    check('a placed card keeps its review color and badges', Boolean(await marks.getAttribute('data-state')) && await marks.locator('.fm-step__marks .fm-mark').count() >= 1,
+      `${await marks.getAttribute('data-state')} · ${await marks.locator('.fm-step__marks').innerText().catch(() => '')}`);
     let measured = await cleanliness(page);
     check('arrows and labels route around the placed card', isClean(measured), JSON.stringify(measured));
     check('the canvas offers to return placed cards', (await page.getByTestId('fm-placed').innerText()).includes('직접 놓은 카드 1'));

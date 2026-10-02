@@ -145,7 +145,8 @@ collapse and viewport values. Old views omit `workflow` until it is explicitly
 patched. Its `collapsedIds` and `viewport` fields remain independently optional;
 writing one never materializes the other. Deleted or invalid node IDs are filtered
 during reads and semantic mutations. View writes require the current source
-revision and do not change it.
+revision and do not change it. A user flow or system flow map takes a different
+patch, `{ "flow": { "positions" } }`; see [Flow map view state](#flow-map-view-state).
 
 ## Fresh reads, events, and Codex access
 
@@ -270,9 +271,30 @@ when it is known and `other` otherwise. Mutations on it return 422
 and returns `invalid_source`, with `sourceStatus.line` when one line is at fault.
 A kind this version does not know is also kept as `declaredKind` in the snapshot.
 `/api/brief` serves `features` maps and flow maps (see below). `/api/subtree/:id`
-serves only `features` maps, and `/api/view` keeps canvas state only for
-`features` maps; other kinds return 422 `unsupported_map_kind`, and a read-only
-map returns 422 `read_only_map`.
+serves only `features` maps. `/api/view` keeps canvas state for `features` maps
+as described above and for flow maps as described below; a read-only map returns
+422 `read_only_map`.
+
+### Flow map view state
+
+A flow map snapshot also carries its
+[view state](FORMAT.md#flow-map-view-state), the cards placed by hand:
+
+```json
+{ "view": { "flow": { "positions": { "owner_check": { "x": 820, "y": 140 } } } } }
+```
+
+`PUT /api/view?project=KEY&map=FILE` with
+`{ "clientId", "baseRevision", "patch": { "flow": { "positions": { "STEP": {x,y} | null } } } }`
+merges placements by step ID; `null` returns that step to automatic placement.
+The patch accepts only `flow.positions`. Every key must be an existing step, and
+`x` and `y` must be numbers from 0 to 1,000,000; otherwise the request returns
+422 `validation_error` and nothing is written. The base revision must be the
+current one (409 `revision_conflict` otherwise). A view write never changes the
+`.mmd` file or its revision; the response and the `snapshot` event carry the new
+view with `origin` set to the client. A patch that changes nothing skips the
+write. A step deleted by a flow operation loses its placement in the response
+and in the saved view.
 
 ### Flow map operations
 

@@ -125,6 +125,37 @@ both collapse lists.
 Deleting it never changes the map meaning; the editor rebuilds a layout. External
 semantic edits retain view entries for still-existing IDs.
 
+### Flow map view state
+
+A [flow map](#flow-maps) keeps the cards that people placed by hand in its own
+view, in Shape map's local state directory, never in the project:
+
+```json
+{
+  "flow": {
+    "positions": {
+      "owner_check": { "x": 820, "y": 140 }
+    }
+  }
+}
+```
+
+`flow.positions` is keyed by step ID. `x` and `y` are numbers from 0 to
+1,000,000, measured from the top-left corner of the step's lane band: `x` from
+the start of the map, `y` from the top of the lane (for a flow without lanes,
+from the top-left corner of the map). A step without an entry is placed
+automatically. Entries for steps that no longer exist are filtered when the view
+is read, and a deletion from Shape map drops them from the file as well.
+
+A placement only says where a card is drawn. Its lane, its order, and its arrows
+come from the `.mmd` file; moving a step to another lane is a `moveStep` edit of
+the file. The layout derives everything else from these spots: automatic cards
+that a placed card would cover move out of the way, a placed card that would
+cover an earlier one moves down past it, lanes grow to hold their cards, and the
+affected arrows route around the cards. This derived spacing is never written
+back, so returning a card to automatic placement restores the automatic layout.
+Deleting the view file only returns every card to automatic placement.
+
 ## Safety boundary
 
 Unknown Mermaid statements, duplicate IDs, duplicate section/settings metadata,

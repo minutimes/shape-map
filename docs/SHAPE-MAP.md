@@ -289,7 +289,8 @@ People edit on the diagram. They can:
   kind;
 - add, rename, reorder, and delete lanes (deleting a lane with steps asks first);
 - create and edit tags, and the map's title and description;
-- edit the Mermaid source, with errors explained in Korean at their line.
+- edit the Mermaid source, with errors explained in Korean at their line;
+- place cards by hand (see [Placing cards by hand](#placing-cards-by-hand)).
 
 Undo and redo restore the file exactly, and an edit from another client clears
 that history. Every edit names the revision it started from. A conflict keeps
@@ -320,4 +321,36 @@ the flow steps that link to it and opens them. Links are explicit: they are
 stored in the flow file and never inferred. A link whose feature was removed or
 renamed stays in the file and is shown as 찾을 수 없는 기능.
 
-Cards cannot yet be placed by hand.
+### Placing cards by hand
+
+The automatic layout is the starting point, and people can place any card where
+they want it:
+
+- **Drag a card** to a new spot. While it moves, a dashed outline shows where it
+  will land and the arrows already follow. A card lands at the nearest clear
+  spot, never on another card, and a short move snaps to the nearby rows and
+  columns so arrows stay straight. On a phone, choose a card first, then drag
+  it; dragging elsewhere still moves the map.
+- **Drop it on another lane** to move the step there. The target lane is
+  highlighted and the outline names it, as in ‘책 주인’ 쪽으로. This is a real edit of the file
+  (the step moves into that lane's `subgraph`, in reading order at the drop
+  point), and one undo returns both the file and the card.
+- **Move it with the keyboard.** Choose a card with Enter or Space, then use the
+  arrow keys; Shift moves it further. It settles a moment after the last key.
+- **Return to automatic placement.** A chosen card that was placed by hand shows
+  자동 자리로. 모두 자동 배치, in a corner of the canvas next to the count of
+  placed cards, returns every card.
+
+A placement inside a lane changes only the view: it is kept in Shape map's local
+state for that map, never in the file (see
+[Flow map view state](FORMAT.md#flow-map-view-state)), and it returns after a
+reload. Placed cards keep their spot in their lane while the rest of the map is
+laid out automatically. Cards under a placed card move out of the way, lanes
+grow to hold what is placed in them, and arrows that touch a placed card or
+would cross one are routed around every card, with their labels on a clear part
+of the arrow. A deleted step loses its placement; undoing the deletion brings it
+back where it was.
+
+Placements share the undo history with content edits, and their colors, badges,
+and reading modes stay as they are: highlighting a tag, showing one lane, the
+overview, the opening view, and the remembered view all work with placed cards.
