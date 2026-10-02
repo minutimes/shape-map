@@ -159,7 +159,8 @@ in Shape map's own `.state/` folder. A file Shape map cannot edit is drawn
 read-only with the reason and the line to fix, and becomes editable once fixed.
 Maps added or changed on disk appear without reloading. The address keeps the
 open project and map, so links and back/forward work. Check maps without the
-app using `npm run map -- check path/to/docs/maps`.
+app using `npm run map -- check path/to/docs/maps`, and rewrite them once in the
+canonical form Shape map writes using `npm run map -- format path/to/docs/maps`.
 
 ## Development
 

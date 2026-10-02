@@ -294,4 +294,6 @@ validation, so undo can restore a file exactly; it is not reordered.
 `npm run map -- check PATH` validates one map file or a `docs/maps` folder without
 a running server. It prints each file's kind, title, and first error with its
 line, and exits with status 1 when a file that declares `features`, `user-flow`, or
-`system-flow` is not valid.
+`system-flow` is not valid. `npm run map -- format PATH` rewrites the editable maps
+there in canonical text (`--dry-run` only lists them). It never rewrites a file
+that Shape map cannot edit.

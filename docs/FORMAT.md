@@ -308,5 +308,6 @@ declaration order; summaries for lanes and then steps; and legends. It indents
 with two spaces, and four inside a lane. A valid file in another form, such as
 chained arrows, arrows inside a lane, or a tag split over several `class` lines,
 is accepted as written. The first edit from Shape map rewrites it in canonical
-form without changing its meaning. Invalid flow sources follow the same safety
+form without changing its meaning. `npm run map -- format PATH` does that rewrite
+ahead of time, so later edits change only the lines people change. Invalid flow sources follow the same safety
 boundary as v1 maps: they are never rewritten.

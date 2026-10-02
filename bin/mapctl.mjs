@@ -57,18 +57,23 @@ program.command('move').arguments('<id> <parentId>')
 program.command('style').arguments('<id>').requiredOption('--shape <shape>', 'rectangle or rounded', shapeOption).requiredOption('--category <id>')
   .action(async (id, options) => output(await mutate({ type: 'setNodePresentation', id, shape: options.shape, category: options.category })));
 
+/** Map files in one file, a docs/maps folder, or a repository that has one. */
+async function mapFiles(target) {
+  const [{ default: fs }, { default: path }, { MAP_FILE_RE }] = await Promise.all([
+    import('node:fs/promises'), import('node:path'), import('../lib/workspace.mjs')]);
+  const resolved = path.resolve(target);
+  const stat = await fs.stat(resolved);
+  if (!stat.isDirectory()) return [resolved];
+  const nested = path.join(resolved, 'docs', 'maps');
+  const directory = await fs.stat(nested).then((item) => item.isDirectory() ? nested : resolved, () => resolved);
+  return (await fs.readdir(directory)).filter((name) => MAP_FILE_RE.test(name)).sort().map((name) => path.join(directory, name));
+}
+
 program.command('check').arguments('<path>').description('Validate one map file or a docs/maps folder without a running server')
   .action(async (target) => {
-    const [{ default: fs }, { default: path }, { classifyMap }, { MAP_FILE_RE }] = await Promise.all([
-      import('node:fs/promises'), import('node:path'), import('../lib/mapSource.mjs'), import('../lib/workspace.mjs')]);
-    const resolved = path.resolve(target);
-    const stat = await fs.stat(resolved);
-    let files;
-    if (stat.isDirectory()) {
-      const nested = path.join(resolved, 'docs', 'maps');
-      const directory = await fs.stat(nested).then((item) => item.isDirectory() ? nested : resolved, () => resolved);
-      files = (await fs.readdir(directory)).filter((name) => MAP_FILE_RE.test(name)).sort().map((name) => path.join(directory, name));
-    } else files = [resolved];
+    const [{ default: fs }, { default: path }, { classifyMap }] = await Promise.all([
+      import('node:fs/promises'), import('node:path'), import('../lib/mapSource.mjs')]);
+    const files = await mapFiles(target);
     if (!files.length) process.stdout.write(`No .mmd maps in ${target}\n`);
     let failed = false;
     for (const file of files) {
@@ -81,6 +86,38 @@ program.command('check').arguments('<path>').description('Validate one map file 
       process.stdout.write(`${status.padEnd(5)} ${path.basename(file)}  ${kind}  "${entry.title}"${problem}\n`);
     }
     if (failed) process.exitCode = 1;
+  });
+
+program.command('format').arguments('<path>')
+  .description('Rewrite editable maps in the canonical text Shape map writes, so later edits change only what people change')
+  .option('--dry-run', 'list the maps that would change without writing them')
+  .action(async (target, options) => {
+    const [{ default: fs }, { default: path }, { default: crypto }, { readEditableMap }, { writeSource }, { writeFlowMap }] = await Promise.all([
+      import('node:fs/promises'), import('node:path'), import('node:crypto'), import('../lib/mapSource.mjs'),
+      import('../lib/format.mjs'), import('../lib/flowMap.mjs')]);
+    const files = await mapFiles(target);
+    if (!files.length) process.stdout.write(`No .mmd maps in ${target}\n`);
+    for (const file of files) {
+      const name = path.basename(file);
+      const source = await fs.readFile(file, 'utf8');
+      let parsed;
+      // Files Shape map cannot edit are never rewritten.
+      try { parsed = await readEditableMap(source); }
+      catch { process.stdout.write(`skip  ${name}  (not editable; run check)\n`); continue; }
+      const canonical = parsed.kind === 'features' ? writeSource(parsed.graph) : writeFlowMap(parsed.graph);
+      if (canonical === source) { process.stdout.write(`same  ${name}\n`); continue; }
+      await readEditableMap(canonical);
+      if (!options.dryRun) {
+        const temporary = path.join(path.dirname(file), `.${name}.${process.pid}.${crypto.randomUUID()}.tmp`);
+        await fs.writeFile(temporary, canonical, 'utf8');
+        if (await fs.readFile(file, 'utf8') !== source) {
+          await fs.rm(temporary, { force: true });
+          throw new Error(`${name} changed while it was being formatted; nothing was written.`);
+        }
+        await fs.rename(temporary, file);
+      }
+      process.stdout.write(`${options.dryRun ? 'would' : 'wrote'} ${name}\n`);
+    }
   });
 
 program.parseAsync().catch((error) => {
