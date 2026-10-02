@@ -8,7 +8,7 @@ import {
   applyNodeChanges,
   useReactFlow,
 } from '@xyflow/react';
-import { mutateMap, readMap, saveView } from './api.js';
+import { legacyMapApi } from './api.js';
 import GraphNode from './GraphNode.jsx';
 import WorkflowNode from './WorkflowNode.jsx';
 import TaskFields from './TaskFields.jsx';
@@ -195,7 +195,8 @@ function Icon({ name }) {
   );
 }
 
-export default function App() {
+export default function App({ api = legacyMapApi }) {
+  const { readMap, mutateMap, saveView } = api;
   const clientId = useRef(makeClientId()).current;
   const { setViewport, getViewport, fitView } = useReactFlow();
   const canvasRef = useRef(null);
@@ -226,7 +227,7 @@ export default function App() {
   const inlineEditor = useMemo(() => {
     let storage;
     try { storage = window.localStorage; } catch { /* Visible recovery warning when editing. */ }
-    return new InlineEditor({ storage, send: (operation) => editorBridgeRef.current(operation) });
+    return new InlineEditor({ storage, scope: api.storagePrefix, send: (operation) => editorBridgeRef.current(operation) });
   }, []);
   const [snapshot, setSnapshot] = useState(null);
   const sections = useMemo(() => splitMapSections(snapshot?.graph), [snapshot?.graph]);
@@ -472,7 +473,7 @@ export default function App() {
     if (workflowModeRef.current) {
       // Old nested-container coordinates do not describe the fixed-card map.
       try {
-        const key = `final-shape-map:branch-layout:v1:${snapshotRef.current?.mapPath}`;
+        const key = `final-shape-map:branch-layout:v1:${api.storagePrefix}${snapshotRef.current?.mapPath}`;
         if (!localStorage.getItem(key)) { savedViewport = null; localStorage.setItem(key, 'true'); }
       } catch { savedViewport = null; }
     }
@@ -525,7 +526,7 @@ export default function App() {
         if (error.name !== 'AbortError') setNotice({ kind: 'error', text: messageOf(error) });
       });
 
-    const events = new EventSource('/api/events');
+    const events = new EventSource(api.eventsUrl);
     const onSnapshot = (event) => {
       try {
         installSnapshot(JSON.parse(event.data), 'event');
@@ -1828,7 +1829,7 @@ export default function App() {
           </div>
         </div>
         <div className="topbar__actions">
-          <a href="/" className="quiet-button" style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}>제품 지도</a>
+          <a href={api.workspaceHref} className="quiet-button" style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}>제품 지도</a>
           {workflowMode ? <InlineSaveStatus editor={inlineEditor} connection={connection} onCopy={writeClipboardText} /> : <span className={`sync-state sync-state--${connection}`} data-testid="connection-status">
             <span aria-hidden="true" />{connection === 'online' ? '동기화됨' : connection === 'offline' ? '연결 확인 중' : '연결 중'}
           </span>}

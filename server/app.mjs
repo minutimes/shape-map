@@ -2,30 +2,96 @@ import express from 'express';
 import { MlcError, validationError } from '../lib/errors.mjs';
 import { readRepository } from '../lib/repository.mjs';
 import { discussionBrief } from '../lib/discussion.mjs';
+import { assertKind } from '../lib/mapSource.mjs';
+import { mapNotFound, projectNotFound } from '../lib/workspace.mjs';
 
 function sendSse(response, event, data) {
   response.write(`event: ${event}\n`);
   response.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-export function createApiApp(store) {
+function openSse(request, response) {
+  response.status(200);
+  response.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+  });
+  response.flushHeaders();
+  const heartbeat = setInterval(() => response.write(': keep-alive\n\n'), 20_000);
+  request.on('close', () => clearInterval(heartbeat));
+}
+
+const NOT_FOUND_CODES = new Set(['project_not_found', 'map_not_found']);
+
+/**
+ * `store` serves the configured single map. With a `workspace`, every map route
+ * also accepts `?project=KEY&map=FILE` and serves that project map instead.
+ */
+export function createApiApp(store, { workspace = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '256kb' }));
+  app.use(express.json({ limit: '17mb' }));
 
-  app.get('/api/map', async (_request, response, next) => {
-    try { response.json(await store.getFreshSnapshot()); }
-    catch (error) { next(error); }
-  });
-  app.get('/api/repository', async (_request, response, next) => {
+  async function mapStore(request) {
+    const { project, map } = request.query;
+    if (project === undefined && map === undefined) {
+      if (!store) throw mapNotFound();
+      request.mapStore = store;
+      return store;
+    }
+    if (!workspace || typeof project !== 'string' || !project) throw projectNotFound();
+    if (typeof map !== 'string' || !map) throw mapNotFound();
+    const selected = await workspace.openMap(project, map);
+    request.mapStore = selected;
+    return selected;
+  }
+
+  app.get('/api/projects', async (_request, response, next) => {
     try {
-      const snapshot = await store.getFreshSnapshot();
-      response.json(await readRepository(store, snapshot.graph));
+      if (!workspace) { response.json({ workspace: false }); return; }
+      response.json({ workspace: true, projects: await workspace.listProjects() });
     } catch (error) { next(error); }
   });
-  app.get('/api/health', async (_request, response, next) => {
+  app.get('/api/project', async (request, response, next) => {
     try {
-      const snapshot = await store.getFreshSnapshot();
+      if (!workspace) throw projectNotFound();
+      response.json(await workspace.listMaps(request.query.project));
+    } catch (error) { next(error); }
+  });
+  app.get('/api/project/events', async (request, response, next) => {
+    let unsubscribe;
+    try {
+      if (!workspace) throw projectNotFound();
+      const key = request.query.project;
+      const { maps } = await workspace.listMaps(key);
+      unsubscribe = await workspace.subscribeMaps(key, (next) => sendSse(response, 'maps', next));
+      openSse(request, response);
+      sendSse(response, 'maps', maps);
+      request.on('close', () => unsubscribe());
+    } catch (error) {
+      unsubscribe?.();
+      next(error);
+    }
+  });
+
+  app.get('/api/map', async (request, response, next) => {
+    try { response.json(await (await mapStore(request)).getFreshSnapshot()); }
+    catch (error) { next(error); }
+  });
+  app.get('/api/repository', async (request, response, next) => {
+    try {
+      const selected = await mapStore(request);
+      const snapshot = await selected.getFreshSnapshot();
+      const graph = snapshot.graph?.nodes ? snapshot.graph : { nodes: [] };
+      response.json(selected.projectPath
+        ? await readRepository(selected, graph, selected.projectPath)
+        : await readRepository(selected, graph));
+    } catch (error) { next(error); }
+  });
+  app.get('/api/health', async (request, response, next) => {
+    try {
+      const snapshot = await (await mapStore(request)).getFreshSnapshot();
       response.json({ ok: true, mapPath: snapshot.mapPath, revision: snapshot.revision, sourceValid: snapshot.sourceStatus.valid });
     } catch (error) { next(error); }
   });
@@ -33,64 +99,66 @@ export function createApiApp(store) {
     try {
       const focus = request.query.focus;
       if (focus !== undefined && (typeof focus !== 'string' || !focus)) throw validationError('focus must be a feature ID.');
-      response.json(discussionBrief(await store.getFreshSnapshot(), focus));
+      const snapshot = await (await mapStore(request)).getFreshSnapshot();
+      assertKind(snapshot, ['features'], 'The brief route');
+      response.json(discussionBrief(snapshot, focus));
     }
     catch (error) { next(error); }
   });
   app.post('/api/brief', async (request, response, next) => {
     try {
+      const selected = await mapStore(request);
       const { focus, problem = '', purpose = '', successCriteria = '', approved = false } = request.body || {};
       if (focus !== undefined && focus !== null && (typeof focus !== 'string' || !focus)) throw validationError('focus must be a feature ID.');
       if ([problem, purpose, successCriteria].some((value) => typeof value !== 'string' || value.length > 4000) || typeof approved !== 'boolean') throw validationError('Invalid discussion request.');
       if (approved && (!problem.trim() || !successCriteria.trim())) throw validationError('An approved request needs a problem and success criteria.');
-      response.json(discussionBrief(await store.getFreshSnapshot(), focus, { problem, purpose, successCriteria, approved }));
+      const snapshot = await selected.getFreshSnapshot();
+      assertKind(snapshot, ['features'], 'The brief route');
+      response.json(discussionBrief(snapshot, focus, { problem, purpose, successCriteria, approved }));
     } catch (error) { next(error); }
   });
   app.get('/api/subtree/:id', async (request, response, next) => {
     try {
       const depth = request.query.depth === undefined ? 2 : Number(request.query.depth);
-      response.json(await store.getFreshSubtree(request.params.id, depth));
+      response.json(await (await mapStore(request)).getFreshSubtree(request.params.id, depth));
     } catch (error) { next(error); }
   });
   app.post('/api/mutations', async (request, response, next) => {
-    try { response.json(await store.mutate(request.body)); }
+    try { response.json(await (await mapStore(request)).mutate(request.body)); }
     catch (error) { next(error); }
   });
   app.put('/api/view', async (request, response, next) => {
-    try { response.json(await store.updateView(request.body)); }
+    try { response.json(await (await mapStore(request)).updateView(request.body)); }
     catch (error) { next(error); }
   });
-  app.get('/api/events', (request, response) => {
-    response.status(200);
-    response.set({
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-    });
-    response.flushHeaders();
-    sendSse(response, 'snapshot', store.getSnapshot());
+  app.get('/api/events', async (request, response, next) => {
+    let selected;
+    try { selected = await mapStore(request); }
+    catch (error) { next(error); return; }
+    openSse(request, response);
+    sendSse(response, 'snapshot', selected.getSnapshot());
     const onSnapshot = (snapshot) => sendSse(response, 'snapshot', snapshot);
     const onSourceError = (payload) => sendSse(response, 'source-error', payload);
-    store.on('snapshot', onSnapshot);
-    store.on('source-error', onSourceError);
-    const heartbeat = setInterval(() => response.write(': keep-alive\n\n'), 20_000);
+    selected.on('snapshot', onSnapshot);
+    selected.on('source-error', onSourceError);
     request.on('close', () => {
-      clearInterval(heartbeat);
-      store.off('snapshot', onSnapshot);
-      store.off('source-error', onSourceError);
+      selected.off('snapshot', onSnapshot);
+      selected.off('source-error', onSourceError);
     });
   });
 
-  app.use((error, _request, response, _next) => {
+  app.use((error, request, response, _next) => {
     if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
       response.status(400).json({ code: 'invalid_json', message: 'Request body is not valid JSON.' });
       return;
     }
     if (error instanceof MlcError) {
-      const status = error.code === 'revision_conflict' || error.code === 'field_conflict' ? 409 : 422;
+      const conflict = error.code === 'revision_conflict' || error.code === 'field_conflict';
+      const status = conflict ? 409 : NOT_FOUND_CODES.has(error.code) ? 404 : 422;
+      const selected = request.mapStore || store;
       response.status(status).json({ code: error.code, message: error.message,
         ...(error.details === undefined ? {} : { details: error.details }),
-        ...(status === 409 ? { snapshot: store.getSnapshot() } : {}) });
+        ...(conflict && selected ? { snapshot: selected.getSnapshot() } : {}) });
       return;
     }
     console.error(error);

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flow map harness</title>
+    <style>
+      .harness-shell { height: 100%; display: flex; flex-direction: column; background: #fff; }
+      .harness-tabs { height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #e4e4e8; font: 12px -apple-system, 'Apple SD Gothic Neo', sans-serif; color: #77777f; overflow-x: auto; }
+      .harness-tabs strong { color: #28282c; white-space: nowrap; }
+      .harness-tabs a { color: #77777f; text-decoration: none; }
+      .harness-tabs a[aria-current] { color: #28282c; font-weight: 650; text-decoration: underline; }
+      .harness-frame { position: relative; flex: 1; min-height: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.jsx"></script>
+  </body>
+</html>
