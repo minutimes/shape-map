@@ -155,7 +155,7 @@ function ProjectView({ projectKey, mapFile, navigate }) {
   const editable = editableLatch.current.editable;
 
   const api = useMemo(() => (mapFile ? createMapApi({ project: projectKey, map: mapFile }) : null), [projectKey, mapFile]);
-  const flowApi = useMemo(() => api && { readMap: api.readMap, mutateMap: api.mutateMap, eventsUrl: api.eventsUrl, requestBrief: api.requestBrief, readLinks: api.readLinks }, [api]);
+  const flowApi = useMemo(() => api && { readMap: api.readMap, mutateMap: api.mutateMap, saveView: api.saveView, eventsUrl: api.eventsUrl, requestBrief: api.requestBrief, readLinks: api.readLinks }, [api]);
   // Flow steps and features link to each other across maps of this project.
   const openFeature = useCallback((file, id) => navigate({ project: projectKey, map: file, open: id }), [navigate, projectKey]);
   const openStep = useCallback((file, id) => navigate({ project: projectKey, map: file, step: id }), [navigate, projectKey]);

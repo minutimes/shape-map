@@ -117,6 +117,18 @@ references remain complete; excerpts of saved map notes are bounded. User-writte
 problem, purpose, and criteria are preserved in full. This release exports to
 the AI you already use; provider calls and email delivery are separate future work.
 
+An AI session can do the same from the terminal through the running server, on
+the configured map or on a project map with `--project KEY --map FILE`:
+
+```sh
+npm run map -- comment reader_search "결과가 너무 많아요" --kind concern --project bookshelf --map 02-lending.mmd
+npm run map -- brief --focus reader_search --project bookshelf --map 02-lending.mmd
+```
+
+`show`, `comment`, `propose`, `turn`, and `brief` are listed in
+[the Shape map contract](docs/SHAPE-MAP.md#api-and-ai-use). Human review has no
+command; only a person confirms it in the app.
+
 Feature comments and proposals are persisted alongside the diagram. Drafts stay
 in the browser while you type. If a person and an AI edit the same feature,
 both versions are shown before saving; unrelated edits can be preserved.
@@ -171,7 +183,15 @@ User flows and system flows have the same collaboration as features: memos,
 proposals, human review, recorded turns, the four colors, and **AI와 논의** /
 **AI에 전달**. A flow step can link to features of the project's 기능 계통도;
 each link opens the feature, and a feature lists the steps that use it. Links are
-stored in the flow file, never inferred.
+stored in the flow file, never inferred. Lanes take memos as well, and any
+recorded turn can be read on the canvas, compared with the previous turn or with
+the live map, without changing it.
+
+Flow cards start in an automatic layout and can be dragged anywhere. A placed
+card keeps its spot (saved in `.state/`, not in the file), the other cards make
+room, and arrows route around cards. Dropping a card on another lane moves the
+step to that lane in the file. Undo covers both, and **자동 자리로** or
+**모두 자동 배치** returns cards to the automatic layout.
 
 ## Development
 

@@ -49,6 +49,7 @@ export function createFakeFlowApi(initialSource, { latency = 80, editable = true
   let updatedAt = new Date(clock).toISOString();
   let origin = 'startup';
   let delay = latency;
+  let positions = {};
   const id = `fake-flow://events/${Math.random().toString(36).slice(2)}`;
   const hub = { sources: new Set() };
   hubs.set(id, hub);
@@ -56,8 +57,13 @@ export function createFakeFlowApi(initialSource, { latency = 80, editable = true
   const wait = () => new Promise((resolve) => setTimeout(resolve, delay));
   const snapshot = () => ({
     revision, updatedAt, origin, mapPath, kind: lastGood.header?.kind || 'user-flow', editable, source,
-    graph: graphOf(lastGood), sourceStatus: status,
+    graph: graphOf(lastGood), view: { flow: { positions: liveSpots() } }, sourceStatus: status,
   });
+  // Placements of steps that no longer exist are dropped, as the server does.
+  const liveSpots = () => {
+    const ids = new Set(graphOf(lastGood).steps.map((step) => step.id));
+    return Object.fromEntries(Object.entries(positions).filter(([id]) => ids.has(id)));
+  };
   const emit = (type, payload) => { for (const listener of hub.sources) listener.dispatch(type, payload); };
 
   function commit(next, by) {
@@ -86,6 +92,19 @@ export function createFakeFlowApi(initialSource, { latency = 80, editable = true
         throw error;
       }
       commit(next, clientId);
+      return snapshot();
+    },
+    async saveView({ baseRevision, clientId, patch }) {
+      await wait();
+      if (!editable) throw httpError(422, { code: 'read_only_map', message: 'This map is read-only.' });
+      if (baseRevision !== revision) throw httpError(409, { code: 'revision_conflict', message: 'The map changed.', snapshot: snapshot() });
+      const ids = new Set(graphOf(lastGood).steps.map((step) => step.id));
+      const changes = patch?.flow?.positions || {};
+      for (const id of Object.keys(changes)) if (!ids.has(id)) throw httpError(422, { code: 'validation_error', message: `flow.positions names a step that does not exist: ${id}` });
+      const next = { ...liveSpots() };
+      for (const [id, spot] of Object.entries(changes)) { if (spot) next[id] = { x: spot.x, y: spot.y }; else delete next[id]; }
+      positions = next; origin = clientId; tick();
+      emit('snapshot', snapshot());
       return snapshot();
     },
   };

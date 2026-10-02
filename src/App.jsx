@@ -1210,7 +1210,15 @@ export default function App({ api = legacyMapApi }) {
 
   useLayoutEffect(() => {
     const selected = new Set(selectedIdsRef.current);
-    const next = graphState.nodes.map((node) => ({ ...node, selected: selected.has(node.id) }));
+    // Keep each card's measured size across rebuilds. Without it React Flow
+    // hides the card until it measures again, and a hidden frame takes focus
+    // away from an open name box, which ends the edit.
+    const measured = new Map(flowNodesRef.current.filter((node) => node.measured).map((node) => [node.id, node.measured]));
+    const next = graphState.nodes.map((node) => ({
+      ...node,
+      selected: selected.has(node.id),
+      ...(measured.has(node.id) ? { measured: measured.get(node.id) } : {}),
+    }));
     if (workflowMode && initializedViewport.current) {
       const previous = flowNodesRef.current;
       const rootId = graphState.rootId;

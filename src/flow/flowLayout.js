@@ -6,8 +6,14 @@
 // Orientation 'rows' puts lanes in horizontal bands and reads left to right.
 // Orientation 'columns' reads top to bottom; it is used for a map without lanes
 // that its author wrote top to bottom, so it looks like a plain flowchart.
+//
+// Cards placed by hand keep their spot inside their lane band. The automatic
+// grid stays where it was, cards under a placed card move out of the way, the
+// band grows, and arrows that touch or cross a placed card are routed around
+// every card (see flowRouting.js).
 import { SHARED_BAND_ID } from './flowConstants.js';
 import { textWidth, truncateText, wrapText } from './flowText.js';
+import { chooseSides, markUsed, routeAround, sidePoint } from './flowRouting.js';
 
 export const FLOW_METRICS = Object.freeze({
   cardWidth: 164,
@@ -225,11 +231,28 @@ function orderRuns(runs) {
   return order;
 }
 
+/** Rows of a band that hold only free cards are dropped so the band closes up. */
+function compactRows(steps, row, free) {
+  const used = new Map();
+  for (const step of steps) {
+    if (free.has(step.id)) continue;
+    const band = bandIdOf(step);
+    if (!used.has(band)) used.set(band, new Set());
+    used.get(band).add(row.get(step.id));
+  }
+  const renumber = new Map([...used].map(([band, rows]) => [band, new Map([...rows].sort((a, b) => a - b).map((value, index) => [value, index]))]));
+  const next = new Map();
+  for (const step of steps) next.set(step.id, free.has(step.id) ? -1 : renumber.get(bandIdOf(step)).get(row.get(step.id)));
+  return next;
+}
+
 /**
- * Lays out a flow map graph ({ lanes, steps, arrows, direction }).
- * @returns {{ orientation, bands, cards, arrows, ranks, gaps, bounds }} in canvas x/y.
+ * One pass of the grid layout. `free` maps step IDs to spots that are not on
+ * the grid ({ m, rc, kind }: main-axis position and cross position inside the
+ * band); those cards and their arrows stay out of the grid. `minGaps` keeps the
+ * gaps of the automatic layout, so placing a card never shifts other columns.
  */
-export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
+function gridPass(graph, options, metrics, free = new Map(), minGaps = null) {
   const orientation = options.orientation || flowOrientation(graph);
   const rowsMode = orientation === 'rows';
   const axis = rowsMode ? metrics.rows : metrics.columns;
@@ -240,7 +263,11 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
   if (steps.some((step) => step.lane == null) || !bandList.length) bandList.push({ id: SHARED_BAND_ID, laneId: null, title: null });
   const bandIndex = new Map(bandList.map((band, position) => [band.id, position]));
   const ranking = rankFlow({ ...graph, steps });
-  const { row, occupied } = assignRows(steps, ranking, bandIndex);
+  const assigned = assignRows(steps, ranking, bandIndex);
+  const row = free.size ? compactRows(steps, assigned.row, free) : assigned.row;
+  const occupied = free.size
+    ? new Map(steps.filter((step) => !free.has(step.id)).map((step) => [`${bandIdOf(step)}|${ranking.rank.get(step.id)}|${row.get(step.id)}`, step.id]))
+    : assigned.occupied;
   const rankCount = ranking.rankCount;
   const size = new Map(steps.map((step) => [step.id, cardSize(step, options, metrics)]));
   const mainSize = (card) => (rowsMode ? card.width : card.height);
@@ -248,25 +275,31 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
 
   // Cross axis: bands, rows inside bands, and the free corridors between them.
   let cursor = 0;
-  const bands = []; const corridors = []; const rowBounds = new Map();
+  const bands = []; const corridors = []; const rowBounds = new Map(); const bandStart = new Map();
   for (const band of bandList) {
     const members = steps.filter((step) => bandIdOf(step) === band.id);
-    const rowCount = members.length ? Math.max(...members.map((step) => row.get(step.id))) + 1 : 0;
+    const gridMembers = free.size ? members.filter((step) => !free.has(step.id)) : members;
+    const rowCount = gridMembers.length ? Math.max(...gridMembers.map((step) => row.get(step.id))) + 1 : 0;
     const sizes = Array.from({ length: rowCount }, (_, r) => Math.max(axis.rowMin,
-      ...members.filter((step) => row.get(step.id) === r).map((step) => crossSize(size.get(step.id)))));
+      ...gridMembers.filter((step) => row.get(step.id) === r).map((step) => crossSize(size.get(step.id)))));
     const start = cursor;
     const rows = [];
     let c = start + axis.bandPad;
     for (let r = 0; r < rowCount; r += 1) { rows.push({ start: c, end: c + sizes[r] }); c += sizes[r] + axis.rowGap; }
-    const extent = rowCount ? c - axis.rowGap + axis.bandPad - start : axis.emptyBand;
-    const end = start + extent;
+    const gridExtent = rowCount ? c - axis.rowGap + axis.bandPad - start : axis.emptyBand;
+    // A band grows to hold the cards placed in it.
+    const freeExtent = Math.max(0, ...members.filter((step) => free.has(step.id))
+      .map((step) => free.get(step.id).rc + crossSize(size.get(step.id)) + axis.bandPad));
+    const extent = Math.max(gridExtent, freeExtent);
+    const end = start + extent; const gridEnd = start + gridExtent;
     bands.push({ ...band, index: bands.length, start, size: extent, rows, stepCount: members.length });
+    bandStart.set(band.id, start);
     rows.forEach((bounds, r) => rowBounds.set(`${band.id}|${r}`, bounds));
-    if (!rowCount) corridors.push({ band: band.id, c0: start + 8, c1: end - 8 });
+    if (!rowCount) corridors.push({ band: band.id, c0: start + 8, c1: gridEnd - 8 });
     else {
       corridors.push({ band: band.id, c0: start + 3, c1: rows[0].start - 4 });
       for (let r = 0; r < rowCount - 1; r += 1) corridors.push({ band: band.id, c0: rows[r].end + 4, c1: rows[r + 1].start - 4 });
-      corridors.push({ band: band.id, c0: rows.at(-1).end + 4, c1: end - 3 });
+      corridors.push({ band: band.id, c0: rows.at(-1).end + 4, c1: gridEnd - 3 });
     }
     cursor = end;
   }
@@ -277,9 +310,16 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
   for (const step of steps) rankSize[ranking.rank.get(step.id)] = Math.max(rankSize[ranking.rank.get(step.id)], mainSize(size.get(step.id)));
 
   const cards = steps.map((step) => {
-    const bounds = rowBounds.get(`${bandIdOf(step)}|${row.get(step.id)}`);
     const { width, height, lines, noteLines } = size.get(step.id);
     const card = { id: step.id, step, band: bandIdOf(step), rank: ranking.rank.get(step.id), row: row.get(step.id), width, height, lines, noteLines };
+    const spot = free.get(step.id);
+    if (spot) {
+      card.free = spot.kind || 'placed';
+      card.c = bandStart.get(card.band) + spot.rc;
+      card.fixedM = spot.m;
+      return card;
+    }
+    const bounds = rowBounds.get(`${bandIdOf(step)}|${row.get(step.id)}`);
     card.c = bounds.start + (bounds.end - bounds.start - crossSize(card)) / 2;
     return card;
   });
@@ -291,7 +331,8 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
   };
 
   // Route topology: which gaps hold cross-direction runs and which corridor, if any.
-  const routes = ranking.arrows.map((arrow, order) => {
+  const gridArrows = free.size ? ranking.arrows.filter((arrow) => !free.has(arrow.source) && !free.has(arrow.target)) : ranking.arrows;
+  const routes = gridArrows.map((arrow, order) => {
     const source = cardById.get(arrow.source); const target = cardById.get(arrow.target);
     const route = { arrow, key: arrowKey(arrow), order, source, target, isReturn: ranking.returns.has(arrowKey(arrow)) };
     const rs = source.rank; const rt = target.rank;
@@ -398,7 +439,7 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
     const tracks = gap.order.length * metrics.trackSpacing + axis.gapPad * 2;
     const labels = Math.max(0, ...gap.labels.map((route) => route.labelBox.main + 14));
     const minimum = gap.index === -1 || gap.index === rankCount - 1 ? axis.margin : axis.gapMin;
-    gap.size = Math.min(axis.gapMax, Math.max(minimum, tracks, labels));
+    gap.size = Math.min(axis.gapMax, Math.max(minimum, tracks, labels, minGaps?.get(gap.index) ?? 0));
     gap.spacing = gap.order.length > 1 ? Math.min(metrics.trackSpacing, (gap.size - axis.gapPad * 2) / (gap.order.length - 1)) : 0;
   }
 
@@ -411,8 +452,11 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
     gaps.get(r).start = m + rankSize[r];
     m += rankSize[r] + gaps.get(r).size;
   }
-  const mainTotal = Math.max(m, gaps.get(-1).size + metrics.cardWidth + axis.margin);
-  for (const card of cards) card.m = ranks[card.rank].start + (ranks[card.rank].size - mainSize(card)) / 2;
+  let mainTotal = Math.max(m, gaps.get(-1).size + metrics.cardWidth + axis.margin);
+  for (const card of cards) {
+    card.m = card.fixedM ?? ranks[card.rank].start + (ranks[card.rank].size - mainSize(card)) / 2;
+    if (card.free) mainTotal = Math.max(mainTotal, card.m + mainSize(card) + axis.margin);
+  }
   const trackAt = (gapIndex, run) => {
     const gap = gaps.get(gapIndex);
     return gap.start + gap.size / 2 + (run.track - (gap.order.length - 1) / 2) * gap.spacing;
@@ -437,6 +481,7 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
     return { key: route.key, source: route.arrow.source, target: route.arrow.target, style: route.arrow.style || 'next',
       label: route.arrow.label, isReturn: route.isReturn, kind: route.kind, points: simplify(points).map(toXY), labelBox: null };
   });
+  const ports = new Map(routes.map((route) => [route.key, { exit: route.exit.c, entry: route.entry.c }]));
 
   // Arrow labels sit in the gap after the source, on their arrow, never on a card.
   const byKey = new Map(arrows.map((arrow) => [arrow.key, arrow]));
@@ -461,16 +506,367 @@ export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
     }
   }
 
-  const outCards = cards.map((card) => {
+  return {
+    orientation, rowsMode, axis, ranking, cards, arrows, ports, bands, gaps, ranks, mainTotal, crossTotal, bandStart, toXY, mainSize, crossSize,
+    freeArrows: free.size ? ranking.arrows.filter((arrow) => free.has(arrow.source) || free.has(arrow.target)) : [],
+  };
+}
+
+/** Hand-set placements that apply to this graph, as main/cross spots inside each band. */
+function readPlacements(graph, placements, rowsMode) {
+  const result = new Map();
+  if (!placements || typeof placements !== 'object') return result;
+  for (const step of graph.steps || []) {
+    const spot = placements[step.id];
+    if (!spot || !Number.isFinite(spot.x) || !Number.isFinite(spot.y)) continue;
+    const x = Math.max(0, spot.x); const y = Math.max(0, spot.y);
+    result.set(step.id, rowsMode ? { m: x, rc: y, kind: 'placed' } : { m: y, rc: x, kind: 'placed' });
+  }
+  return result;
+}
+
+// Clearance between a placed card and its neighbors: room for an arrow to pass.
+export const PLACE_GAP = 28;
+
+/** Overlap in main/cross space, keeping a clearance between cards. */
+function clash(a, b, gap = PLACE_GAP) {
+  return a.m < b.m + b.mainSize + gap && b.m < a.m + a.mainSize + gap && a.rc < b.rc + b.crossSize + gap && b.rc < a.rc + a.crossSize + gap;
+}
+
+/**
+ * Settles placed cards (a card that would cover an earlier one moves past it
+ * along the cross axis) and moves automatic cards out from under placed ones.
+ * Saved spots are never rewritten; this spacing is derived on every layout.
+ */
+function settle(pass, requested) {
+  const { axis } = pass;
+  const declaration = new Map(pass.cards.map((card, index) => [card.id, index]));
+  const boxes = pass.cards.map((card) => {
+    const spot = requested.get(card.id);
+    return { id: card.id, band: card.band, m: spot ? spot.m : card.m, rc: spot ? spot.rc : card.c - pass.bandStart.get(card.band),
+      mainSize: pass.mainSize(card), crossSize: pass.crossSize(card), spot, row: card.row, rank: card.rank };
+  });
+  const settled = new Map();
+  const settleBox = (box) => {
+    const list = settled.get(box.band) || [];
+    for (let guard = 0; guard < 500; guard += 1) {
+      const blocker = list.find((other) => clash(box, other));
+      if (!blocker) break;
+      box.rc = blocker.rc + blocker.crossSize + PLACE_GAP;
+    }
+    list.push(box);
+    settled.set(box.band, list);
+  };
+  const next = new Map();
+  const placed = boxes.filter((box) => box.spot?.kind === 'placed')
+    .sort((a, b) => a.rc - b.rc || a.m - b.m || declaration.get(a.id) - declaration.get(b.id));
+  for (const box of placed) { settleBox(box); next.set(box.id, { ...box.spot, rc: box.rc }); }
+  const others = boxes.filter((box) => box.spot?.kind !== 'placed')
+    .sort((a, b) => a.row - b.row || a.rank - b.rank || declaration.get(a.id) - declaration.get(b.id));
+  for (const box of others) {
+    const list = settled.get(box.band) || [];
+    if (!box.spot && !list.some((other) => clash(box, other))) {
+      // A card that stays on the grid still blocks cards moved out of the way later.
+      list.push(box); settled.set(box.band, list);
+      continue;
+    }
+    if (box.spot) box.rc = box.spot.rc;
+    const blocker = list.find((other) => clash(box, other));
+    if (blocker) box.rc = Math.max(box.rc, blocker.rc + blocker.crossSize + axis.rowGap);
+    settleBox(box);
+    next.set(box.id, { m: box.m, rc: box.rc, kind: 'moved' });
+  }
+  return next;
+}
+
+const sameSpots = (a, b) => a.size === b.size && [...a].every(([id, spot]) => {
+  const other = b.get(id);
+  return other && other.kind === spot.kind && Math.abs(other.m - spot.m) < .01 && Math.abs(other.rc - spot.rc) < .01;
+});
+
+const overlapBox = (a, b, pad = 3) => a.x < b.x + b.width + pad && b.x < a.x + a.width + pad && a.y < b.y + b.height + pad && b.y < a.y + a.height + pad;
+
+function segmentCrosses(a, b, rect, pad = 2) {
+  const left = rect.x - pad; const right = rect.x + rect.width + pad; const top = rect.y - pad; const bottom = rect.y + rect.height + pad;
+  if (Math.abs(a.y - b.y) < .01) return a.y > top && a.y < bottom && Math.max(a.x, b.x) > left && Math.min(a.x, b.x) < right;
+  return a.x > left && a.x < right && Math.max(a.y, b.y) > top && Math.min(a.y, b.y) < bottom;
+}
+
+/**
+ * Routes the arrows that touch a card off the grid, or that such a card now
+ * blocks, around every card, and gives their labels a clear spot.
+ */
+function routeOffGrid(pass, metrics) {
+  const { orientation, rowsMode } = pass;
+  const rects = pass.cards.map((card) => { const point = pass.toXY({ m: card.m, c: card.c }); return { id: card.id, x: point.x, y: point.y, width: card.width, height: card.height, card }; });
+  const rectById = new Map(rects.map((item) => [item.id, item]));
+  const offGrid = rects.filter((item) => item.card.free);
+  const kept = []; const jobs = [];
+  for (const arrow of pass.arrows) {
+    const blocked = offGrid.some((item) => item.id !== arrow.source && item.id !== arrow.target
+      && arrow.points.some((point, index) => index > 0 && segmentCrosses(arrow.points[index - 1], point, item)))
+      // A label right beside a card that left the grid would sit on that card's arrows.
+      || (arrow.labelBox && offGrid.some((item) => overlapBox(arrow.labelBox, item, 18)));
+    if (blocked) jobs.push({ arrow, key: arrow.key, isReturn: arrow.isReturn });
+    else kept.push(arrow);
+  }
+  for (const arrow of pass.freeArrows) jobs.push({ arrow, key: arrowKey(arrow), isReturn: pass.ranking.returns.has(arrowKey(arrow)) });
+  if (!jobs.length) return kept;
+
+  // Ports still used by arrows that keep their automatic route.
+  const taken = new Map();
+  const take = (key, value) => { if (!taken.has(key)) taken.set(key, []); taken.get(key).push(value); };
+  for (const arrow of kept) {
+    const port = pass.ports.get(arrow.key);
+    take(`${arrow.source}|${rowsMode ? 'right' : 'bottom'}`, port.exit);
+    take(`${arrow.target}|${rowsMode ? 'left' : 'top'}`, port.entry);
+  }
+  const groups = new Map();
+  const join = (key, entry) => { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(entry); };
+  for (const job of jobs) {
+    job.sourceRect = rectById.get(job.arrow.source); job.targetRect = rectById.get(job.arrow.target);
+    Object.assign(job, chooseSides(job.sourceRect, job.targetRect, orientation));
+    join(`${job.arrow.source}|${job.exit}`, { job, end: 'start', far: job.targetRect });
+    join(`${job.arrow.target}|${job.entry}`, { job, end: 'end', far: job.sourceRect });
+  }
+  // Spread ports along each side by where the other end is, around ports already taken.
+  // Exits go first; an entry then lines up with its exit when it can, so the arrow runs straight.
+  const spacing = metrics.rows.portSpacing;
+  const assign = (key, list, phase) => {
+    const cut = key.lastIndexOf('|');
+    const item = rectById.get(key.slice(0, cut)); const side = key.slice(cut + 1);
+    const vertical = side === 'left' || side === 'right';
+    const center = vertical ? item.y + item.height / 2 : item.x + item.width / 2;
+    const reach = Math.max(0, (vertical ? item.height : item.width) / 2 - (vertical ? 9 : 22));
+    const farCenter = (entry) => (vertical ? entry.far.y + entry.far.height / 2 : entry.far.x + entry.far.width / 2);
+    list.sort((a, b) => farCenter(a) - farCenter(b) || a.job.key.localeCompare(b.job.key));
+    const shared = (taken.get(key) || []).map((value) => value - center);
+    const chosen = [];
+    list.forEach((entry, index) => {
+      let wanted = list.length === 1 && !shared.length ? 0 : (index - (list.length - 1) / 2) * spacing;
+      if (phase === 'end') {
+        const exit = entry.job.start; const aligned = (vertical ? exit.y : exit.x) - center;
+        if (Math.abs(aligned) <= reach) wanted = aligned;
+      }
+      let offset = null;
+      for (let k = 0; k <= 16 && offset === null; k += 1) {
+        for (const candidate of k ? [wanted + k * 4, wanted - k * 4] : [wanted]) {
+          if (Math.abs(candidate) > reach + .01) continue;
+          if ([...shared, ...chosen].some((value) => Math.abs(value - candidate) < spacing - 2)) continue;
+          offset = candidate; break;
+        }
+      }
+      offset ??= Math.max(-reach, Math.min(reach, wanted));
+      chosen.push(offset);
+      const inset = portInset(item.card.step.shape, item.card, offset, vertical ? 'rows' : 'columns', metrics);
+      entry.job[entry.end] = sidePoint(item, side, offset, inset);
+    });
+  };
+  for (const phase of ['start', 'end']) {
+    for (const [key, list] of groups) {
+      const part = list.filter((entry) => entry.end === phase);
+      if (part.length) assign(key, part, phase);
+      // Ports chosen for exits are taken for entries on the same side.
+      if (phase === 'start') for (const entry of part) { const point = entry.job.start; const vertical = entry.job.exit === 'left' || entry.job.exit === 'right'; take(key, vertical ? point.y : point.x); }
+    }
+  }
+  // Short routes first, so longer detours go around them.
+  const distance = (job) => Math.abs(job.start.x - job.end.x) + Math.abs(job.start.y - job.end.y);
+  jobs.sort((a, b) => distance(a) - distance(b) || a.key.localeCompare(b.key));
+  const used = new Map();
+  for (const arrow of kept) markUsed(used, arrow.points);
+  // Rerouted arrows keep off every label. Each one's own label is placed as soon as it is routed,
+  // clear of cards, labels, and the lines drawn so far, and later routes go around it.
+  const labels = kept.filter((arrow) => arrow.labelBox).map((arrow) => arrow.labelBox);
+  const obstacles = [...rects, ...labels.map((box) => ({ ...box, pad: 4 }))];
+  const routed = [];
+  for (const job of jobs) {
+    const points = routeAround({ start: job.start, exitSide: job.exit, end: job.end, entrySide: job.entry, obstacles, used })
+      .map((point) => ({ x: Math.round(point.x * 10) / 10, y: Math.round(point.y * 10) / 10 }));
+    markUsed(used, points);
+    const arrow = { key: job.key, source: job.arrow.source, target: job.arrow.target, style: job.arrow.style || 'next', label: job.arrow.label,
+      isReturn: job.isReturn, kind: 'free', points, labelBox: null };
+    routed.push(arrow);
+    if (!arrow.label) continue;
+    const cut = truncateText(arrow.label, metrics.arrowLabelMaxText, metrics.arrowFont);
+    const width = Math.ceil(textWidth(cut.text, metrics.arrowFont) + metrics.arrowLabelPadX * 2 + 4);
+    const height = metrics.arrowLabelHeight;
+    const lines = [...kept, ...routed].filter((other) => other !== arrow);
+    const onLine = (box) => lines.some((other) => other.points.some((point, index) => index > 0 && segmentCrosses(other.points[index - 1], point, box, 1)));
+    const clear = (box) => !rects.some((item) => overlapBox(box, item)) && !labels.some((other) => overlapBox(box, other)) && !onLine(box);
+    const segments = arrow.points.slice(1).map((point, index) => ({ a: arrow.points[index], b: point, index,
+      length: Math.abs(arrow.points[index].x - point.x) + Math.abs(arrow.points[index].y - point.y) }))
+      .sort((p, q) => q.length - p.length || p.index - q.index);
+    let chosen = null;
+    for (const segment of segments) {
+      const horizontal = Math.abs(segment.a.y - segment.b.y) < .01;
+      const span = horizontal ? width : height;
+      if (segment.length < span + 8) continue;
+      const low = horizontal ? Math.min(segment.a.x, segment.b.x) : Math.min(segment.a.y, segment.b.y);
+      const high = horizontal ? Math.max(segment.a.x, segment.b.x) : Math.max(segment.a.y, segment.b.y);
+      const middle = (low + high) / 2;
+      for (let shift = 0; !chosen && shift <= (high - low - span) / 2; shift += 8) {
+        for (const at of shift ? [middle - shift, middle + shift] : [middle]) {
+          const box = horizontal ? { x: at - width / 2, y: segment.a.y - height / 2, width, height } : { x: segment.a.x - width / 2, y: at - height / 2, width, height };
+          if (clear(box)) { chosen = box; break; }
+        }
+      }
+      if (chosen) break;
+    }
+    if (!chosen) {
+      // No run is long enough: look along the arrow and beside it for the nearest clear spot.
+      const total = segments.reduce((sum, segment) => sum + segment.length, 0);
+      const along = (distance) => {
+        let rest = distance;
+        for (let i = 1; i < arrow.points.length; i += 1) {
+          const a = arrow.points[i - 1]; const b = arrow.points[i];
+          const length = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+          if (rest <= length) { const t = length ? rest / length : 0; return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }; }
+          rest -= length;
+        }
+        return arrow.points.at(-1);
+      };
+      const tries = [];
+      for (let step = 0; step <= total; step += 6) {
+        const point = along(step);
+        for (const [dx, dy] of [[0, 0], [0, -(height / 2 + 4)], [0, height / 2 + 4], [width / 2 + 4, 0], [-(width / 2 + 4), 0], [0, -(height + 8)], [0, height + 8]]) {
+          tries.push({ x: point.x + dx - width / 2, y: point.y + dy - height / 2, width, height, rank: Math.abs(step - total / 2) + Math.abs(dx) + Math.abs(dy) * 2 });
+        }
+      }
+      tries.sort((a, b) => a.rank - b.rank);
+      chosen = tries.find(clear) || tries[0];
+    }
+    arrow.labelBox = { x: Math.round(chosen.x), y: Math.round(chosen.y), width, height, text: cut.text, full: arrow.label, truncated: cut.truncated };
+    labels.push(arrow.labelBox);
+    obstacles.push({ ...arrow.labelBox, pad: 4 });
+  }
+  const order = new Map(pass.ranking.arrows.map((arrow, index) => [arrowKey(arrow), index]));
+  return [...kept, ...routed].sort((a, b) => order.get(a.key) - order.get(b.key));
+}
+
+/**
+ * Lays out a flow map graph ({ lanes, steps, arrows, direction }).
+ * `options.placements` maps step IDs to hand-set spots `{x, y}` measured from
+ * the top-left corner of the step's lane band. Everything else is automatic.
+ * @returns {{ orientation, bands, cards, arrows, ranks, gaps, bounds }} in canvas x/y.
+ */
+export function layoutFlow(graph, options = {}, metrics = FLOW_METRICS) {
+  const base = gridPass(graph, options, metrics);
+  const requested = readPlacements(graph, options.placements, base.rowsMode);
+  let pass = base;
+  if (requested.size) {
+    const minGaps = new Map([...base.gaps.values()].map((gap) => [gap.index, gap.size]));
+    let free = requested;
+    for (let round = 0; round < 8; round += 1) {
+      pass = gridPass(graph, options, metrics, free, minGaps);
+      const next = settle(pass, free);
+      if (sameSpots(next, free)) break;
+      free = next;
+      if (round === 7) pass = gridPass(graph, options, metrics, free, minGaps);
+    }
+  }
+  const { rowsMode, toXY } = pass;
+  const arrows = requested.size ? routeOffGrid(pass, metrics) : pass.arrows;
+  const outCards = pass.cards.map((card) => {
     const point = toXY({ m: card.m, c: card.c });
     return { id: card.id, step: card.step, band: card.band, rank: card.rank, row: card.row, x: point.x, y: point.y,
-      width: card.width, height: card.height, lines: card.lines, noteLines: card.noteLines };
+      width: card.width, height: card.height, lines: card.lines, noteLines: card.noteLines, placed: card.free === 'placed' };
   });
-  const outBands = bands.map((band) => (rowsMode
+  const mainTotal = pass.mainTotal;
+  const outBands = pass.bands.map((band) => (rowsMode
     ? { id: band.id, laneId: band.laneId, title: band.title, index: band.index, stepCount: band.stepCount, x: 0, y: band.start, width: mainTotal, height: band.size }
     : { id: band.id, laneId: band.laneId, title: band.title, index: band.index, stepCount: band.stepCount, x: band.start, y: 0, width: band.size, height: mainTotal }));
-  const bounds = rowsMode ? { x: 0, y: 0, width: mainTotal, height: Math.max(1, crossTotal) } : { x: 0, y: 0, width: Math.max(1, crossTotal), height: mainTotal };
-  return { orientation, bands: outBands, cards: outCards, arrows, bounds,
-    ranks: ranks.map((rank) => ({ index: rank.index, start: rank.start, size: rank.size })),
-    gaps: [...gaps.values()].sort((a, b) => a.index - b.index).map((gap) => ({ index: gap.index, start: gap.start, size: gap.size })) };
+  let bounds = rowsMode ? { x: 0, y: 0, width: mainTotal, height: Math.max(1, pass.crossTotal) } : { x: 0, y: 0, width: Math.max(1, pass.crossTotal), height: mainTotal };
+  if (requested.size) {
+    // A detour or a label can reach past the bands; the fit view includes it.
+    let right = bounds.width; let bottom = bounds.height;
+    for (const arrow of arrows) {
+      for (const point of arrow.points) { right = Math.max(right, point.x + 12); bottom = Math.max(bottom, point.y + 12); }
+      if (arrow.labelBox) { right = Math.max(right, arrow.labelBox.x + arrow.labelBox.width + 6); bottom = Math.max(bottom, arrow.labelBox.y + arrow.labelBox.height + 6); }
+    }
+    bounds = { x: 0, y: 0, width: Math.ceil(right), height: Math.ceil(bottom) };
+  }
+  return { orientation: pass.orientation, bands: outBands, cards: outCards, arrows, bounds,
+    ranks: pass.ranks.map((rank) => ({ index: rank.index, start: rank.start, size: rank.size })),
+    gaps: [...pass.gaps.values()].sort((a, b) => a.index - b.index).map((gap) => ({ index: gap.index, start: gap.start, size: gap.size })) };
+}
+
+/** The lane band under a canvas point; above or below every band, the nearest one. */
+export function bandAt(layout, point) {
+  const rows = layout.orientation === 'rows';
+  const value = rows ? point.y : point.x;
+  let nearest = null;
+  for (const band of layout.bands) {
+    const start = rows ? band.y : band.x; const end = start + (rows ? band.height : band.width);
+    if (value >= start && value < end) return band;
+    const distance = value < start ? start - value : value - end;
+    if (!nearest || distance < nearest.distance) nearest = { band, distance };
+  }
+  return nearest?.band ?? null;
+}
+
+/** A saved placement for a card whose top-left corner is at canvas `point` in `band`. */
+export function placementFor(layout, band, point) {
+  const x = Math.max(0, Math.round(point.x - band.x)); const y = Math.max(0, Math.round(point.y - band.y));
+  return { x, y };
+}
+
+/**
+ * The nearest spot to `point` (a card's top-left corner) where a card of
+ * `size` keeps a clear gap from every other card, staying inside its band's
+ * start. Short moves snap to the automatic rows and columns so arrows stay straight.
+ */
+export function freeSpot(layout, id, size, point, band, gap = PLACE_GAP) {
+  const others = layout.cards.filter((card) => card.id !== id);
+  const rows = layout.orientation === 'rows';
+  const snap = (value, targets, reach = 12) => {
+    let best = value; let distance = reach + 1;
+    for (const target of targets) if (Math.abs(target - value) < distance) { best = target; distance = Math.abs(target - value); }
+    return best;
+  };
+  const self = layout.cards.find((card) => card.id === id);
+  const mainLength = rows ? size.width : size.height;
+  const columnStarts = [...new Set([...others.map((card) => (rows ? card.x : card.y)),
+    ...layout.ranks.map((rank) => rank.start + (rank.size - mainLength) / 2), ...(self ? [rows ? self.x : self.y] : [])])];
+  // Cards in the same band line up by center across the lane.
+  const rowCenters = [...new Set(others.filter((card) => card.band === band.id).map((card) => (rows ? card.y + card.height / 2 : card.x + card.width / 2)))];
+  const minCross = rows ? band.y + 6 : band.x + 6;
+  const tidy = (candidate) => {
+    let x = candidate.x; let y = candidate.y;
+    if (rows) { x = snap(x, columnStarts); y = snap(y + size.height / 2, rowCenters) - size.height / 2; y = Math.max(minCross, y); x = Math.max(0, x); }
+    else { y = snap(y, columnStarts); x = snap(x + size.width / 2, rowCenters) - size.width / 2; x = Math.max(minCross, x); y = Math.max(0, y); }
+    return { x: Math.round(x), y: Math.round(y) };
+  };
+  const fits = (candidate) => others.every((card) => !(candidate.x < card.x + card.width + gap && card.x < candidate.x + size.width + gap
+    && candidate.y < card.y + card.height + gap && card.y < candidate.y + size.height + gap));
+  const start = tidy(point);
+  if (fits(start)) return start;
+  const raw = { x: Math.round(Math.max(rows ? 0 : minCross, point.x)), y: Math.round(Math.max(rows ? minCross : 0, point.y)) };
+  if (fits(raw)) return raw;
+  // Candidates beside each card in the way, then beside those, nearest first.
+  let frontier = [raw];
+  const seen = new Set();
+  let best = null;
+  for (let depth = 0; depth < 3 && !best; depth += 1) {
+    const next = [];
+    for (const from of frontier) {
+      for (const card of others) {
+        if (!(from.x < card.x + card.width + gap && card.x < from.x + size.width + gap && from.y < card.y + card.height + gap && card.y < from.y + size.height + gap)) continue;
+        for (const candidate of [
+          { x: card.x - size.width - gap - 1, y: from.y }, { x: card.x + card.width + gap + 1, y: from.y },
+          { x: from.x, y: card.y - size.height - gap - 1 }, { x: from.x, y: card.y + card.height + gap + 1 },
+        ]) {
+          const clamped = { x: Math.round(Math.max(rows ? 0 : minCross, candidate.x)), y: Math.round(Math.max(rows ? minCross : 0, candidate.y)) };
+          const key = `${clamped.x},${clamped.y}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          next.push(clamped);
+        }
+      }
+    }
+    const distance = (candidate) => Math.hypot(candidate.x - point.x, candidate.y - point.y);
+    for (const candidate of next.sort((a, b) => distance(a) - distance(b))) if (fits(candidate)) { best = candidate; break; }
+    frontier = next.slice(0, 40);
+  }
+  return best || raw;
 }

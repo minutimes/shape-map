@@ -125,6 +125,37 @@ both collapse lists.
 Deleting it never changes the map meaning; the editor rebuilds a layout. External
 semantic edits retain view entries for still-existing IDs.
 
+### Flow map view state
+
+A [flow map](#flow-maps) keeps the cards that people placed by hand in its own
+view, in Shape map's local state directory, never in the project:
+
+```json
+{
+  "flow": {
+    "positions": {
+      "owner_check": { "x": 820, "y": 140 }
+    }
+  }
+}
+```
+
+`flow.positions` is keyed by step ID. `x` and `y` are numbers from 0 to
+1,000,000, measured from the top-left corner of the step's lane band: `x` from
+the start of the map, `y` from the top of the lane (for a flow without lanes,
+from the top-left corner of the map). A step without an entry is placed
+automatically. Entries for steps that no longer exist are filtered when the view
+is read, and a deletion from Shape map drops them from the file as well.
+
+A placement only says where a card is drawn. Its lane, its order, and its arrows
+come from the `.mmd` file; moving a step to another lane is a `moveStep` edit of
+the file. The layout derives everything else from these spots: automatic cards
+that a placed card would cover move out of the way, a placed card that would
+cover an earlier one moves down past it, lanes grow to hold their cards, and the
+affected arrows route around the cards. This derived spacing is never written
+back, so returning a card to automatic placement restores the automatic layout.
+Deleting the view file only returns every card to automatic placement.
+
 ## Safety boundary
 
 Unknown Mermaid statements, duplicate IDs, duplicate section/settings metadata,
@@ -308,7 +339,7 @@ Each statement is on its own line; blank lines are allowed.
   Shape map shows them as chips and can highlight them. A tag may be defined
   without being used.
 - **Descriptions and records.** `%% sm-block: ID|JSON` on a step or lane. A lane
-  block has only `summary`. A step block may have `summary`, then the
+  block has `summary` and memos (`comments`), in that order. A step block may have `summary`, then the
   collaboration records described in [Flow collaboration](#flow-collaboration):
   `features`, `status`, `review`, and `comments`, written in that order. A note
   about a step belongs in its `summary` rather than in a separate note box.
@@ -368,7 +399,7 @@ and live in the flow file itself.
 | `features` | 1–50 explicit links `{ "map", "id" }` to features of the same project. `map` is a file name in `docs/maps/` such as `01-features.mmd`; `id` is a feature ID. Each link appears once. Links are never inferred. A link whose map or feature no longer exists stays valid and is shown as 찾을 수 없는 기능. To remove all links, remove the field. |
 | `status` | `neutral`, `planned`, `verified`, or `concern`, as for features. Shape map writes `verified` with a review and removes the field otherwise; an explicit value in the file is kept. |
 | `review` | `{ "at", "fingerprint" }`: when a person confirmed the step, and the SHA-256 fingerprint of its content then. |
-| `comments` | Up to 1,000 memos `{ id, body, kind, author, createdAt, resolved? }`; `kind` is `note`, `concern`, or `change`. |
+| `comments` | Up to 1,000 memos `{ id, body, kind, author, createdAt, resolved? }`; `kind` is `note`, `concern`, or `change`. Lanes take `comments` too; they are the only record a lane has. |
 | `mlc-proposal` | The next change for the step: optional `reason` (problem), `purpose`, `logic` (desired change), and `successCriteria`, each up to 4,000 characters. `{}` is kept. Other proposal fields of features maps are rejected. |
 | `sm-turn` | A recorded turn: `id`, consecutive `number`, `title` (up to 200 characters), optional `summary`, `createdAt`, source `revision`, and a snapshot of `lanes`, `steps`, `arrows`, and `tags` (steps keep their records). At most 100 turns and 1 MiB per turn. |
 

@@ -145,7 +145,8 @@ collapse and viewport values. Old views omit `workflow` until it is explicitly
 patched. Its `collapsedIds` and `viewport` fields remain independently optional;
 writing one never materializes the other. Deleted or invalid node IDs are filtered
 during reads and semantic mutations. View writes require the current source
-revision and do not change it.
+revision and do not change it. A user flow or system flow map takes a different
+patch, `{ "flow": { "positions" } }`; see [Flow map view state](#flow-map-view-state).
 
 ## Fresh reads, events, and Codex access
 
@@ -270,9 +271,30 @@ when it is known and `other` otherwise. Mutations on it return 422
 and returns `invalid_source`, with `sourceStatus.line` when one line is at fault.
 A kind this version does not know is also kept as `declaredKind` in the snapshot.
 `/api/brief` serves `features` maps and flow maps (see below). `/api/subtree/:id`
-serves only `features` maps, and `/api/view` keeps canvas state only for
-`features` maps; other kinds return 422 `unsupported_map_kind`, and a read-only
-map returns 422 `read_only_map`.
+serves only `features` maps. `/api/view` keeps canvas state for `features` maps
+as described above and for flow maps as described below; a read-only map returns
+422 `read_only_map`.
+
+### Flow map view state
+
+A flow map snapshot also carries its
+[view state](FORMAT.md#flow-map-view-state), the cards placed by hand:
+
+```json
+{ "view": { "flow": { "positions": { "owner_check": { "x": 820, "y": 140 } } } } }
+```
+
+`PUT /api/view?project=KEY&map=FILE` with
+`{ "clientId", "baseRevision", "patch": { "flow": { "positions": { "STEP": {x,y} | null } } } }`
+merges placements by step ID; `null` returns that step to automatic placement.
+The patch accepts only `flow.positions`. Every key must be an existing step, and
+`x` and `y` must be numbers from 0 to 1,000,000; otherwise the request returns
+422 `validation_error` and nothing is written. The base revision must be the
+current one (409 `revision_conflict` otherwise). A view write never changes the
+`.mmd` file or its revision; the response and the `snapshot` event carry the new
+view with `origin` set to the client. A patch that changes nothing skips the
+write. A step deleted by a flow operation loses its placement in the response
+and in the saved view.
 
 ### Flow map operations
 
@@ -297,8 +319,8 @@ exact current revision.
 | `deleteTag` | `id`; removes the tag from every lane and step |
 | `setMapHeader` | optional `title` and `description` (`null` removes) |
 | `replaceSource` | `source`: complete text that must parse as a flow map (either flow kind; changing the kind moves the map to the other tab); used by the source editor and by undo and redo |
-| `addComment` | `id` (step), `body`, `kind` (`note`, `concern`, or `change`), `author`; the service adds the comment `id` and `createdAt` |
-| `resolveComment` | `id`, `commentId`, optional `resolved` (default `true`) |
+| `addComment` | `id` (step or lane), `body`, `kind` (`note`, `concern`, or `change`), `author`; the service adds the comment `id` and `createdAt` |
+| `resolveComment` | `id` (step or lane), `commentId`, optional `resolved` (default `true`) |
 | `setProposal` | `id`, `proposal` (`{reason?, purpose?, logic?, successCriteria?}`) or `null` to withdraw it |
 | `setBlock` | `id`, `block: { status }`; `verified` records a review with the service's time and the step's current fingerprint, any other status removes the review, and `neutral` removes the status |
 | `createTurn` | `title`, optional `summary`; the service adds the turn `id`, `number`, `createdAt`, the current `revision`, and the snapshot |
@@ -324,7 +346,8 @@ when both are removed. Unknown fields, such as `kind`, are rejected.
 ### Flow discussion and feature links
 
 `GET /api/brief` and `POST /api/brief` accept a flow map as well. `focus` is then a
-step ID, and an unknown step returns 422. The request fields and approval rules are
+step or lane ID, and an unknown ID returns 422. Lanes with new unresolved memos are
+listed after the steps; a lane focus lists that lane's memos, description, and steps. The request fields and approval rules are
 the same as for features maps. The text names the canonical file and revision,
 then only the steps that changed since the last turn (with the changed parts),
 were added, carry a proposal that changed, or have new unresolved memos, at most
