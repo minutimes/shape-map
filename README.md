@@ -143,6 +143,24 @@ and from human review.
 There is no paid service or API key requirement. The server listens on loopback,
 reads only the configured map workspace, and rejects out-of-workspace symlinks.
 
+## Open product repositories
+
+Point Shape map at a folder that holds your product repositories:
+
+```sh
+SHAPE_MAP_WORKSPACE_ROOT=/path/to/products npm run dev
+```
+
+The home screen lists each Git repository in that folder, and its worktrees
+with their branch. Opening one shows every map in its `docs/maps/` folder in
+tabs: **기능 계통도**, **유저 플로우**, **시스템 플로우**, and **기타 그림**. Edits
+are written straight back to that repository's `.mmd` files; canvas state stays
+in Shape map's own `.state/` folder. A file Shape map cannot edit is drawn
+read-only with the reason and the line to fix, and becomes editable once fixed.
+Maps added or changed on disk appear without reloading. The address keeps the
+open project and map, so links and back/forward work. Check maps without the
+app using `npm run map -- check path/to/docs/maps`.
+
 ## Development
 
 ```sh

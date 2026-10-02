@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Background, BackgroundVariant, ConnectionMode, MiniMap, ReactFlow, applyNodeChanges, getViewportForBounds, useReactFlow, useViewport } from '@xyflow/react';
-import { mutateMap, readMap, saveView } from './api.js';
+import { legacyMapApi } from './api.js';
 import { compareTurnGraphs, getBlockState, nodeFingerprint } from '../lib/shape.mjs';
 import { readingStates } from '../lib/diagram.mjs';
 import { absoluteShapePosition, defaultShapeCollapsed, shapeAncestors, shapeLayout, SHAPE_VIEWS, turnGraph } from './shapeLayout.js';
@@ -228,7 +228,8 @@ function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, map
   </aside>;
 }
 
-export default function ShapeWorkspace() {
+export default function ShapeWorkspace({ api = legacyMapApi, title, embedded = false }) {
+  const { readMap, mutateMap, saveView } = api;
   const [snapshot, setSnapshot] = useState(null);
   const snapshotRef = useRef(null);
   const [connection, setConnection] = useState('connecting');
@@ -318,7 +319,7 @@ export default function ShapeWorkspace() {
   useEffect(() => {
     let disposed = false;
     readMap().then((next) => { if (!disposed) { accept(next); setConnection('online'); } }).catch(() => { if (!disposed) setConnection('offline'); });
-    const events = new EventSource('/api/events');
+    const events = new EventSource(api.eventsUrl);
     events.addEventListener('snapshot', (event) => { if (!disposed) {
       const next = JSON.parse(event.data);
       // Install our final response once. The semantic write and its view save
@@ -330,7 +331,7 @@ export default function ShapeWorkspace() {
     events.onopen = () => { if (!disposed) setConnection('online'); };
     events.onerror = () => { if (!disposed) setConnection('offline'); };
     return () => { disposed = true; events.close(); clearTimeout(viewTimer.current); };
-  }, [accept]);
+  }, [accept, api]);
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), toast.error ? 10000 : 3500);
@@ -521,24 +522,24 @@ export default function ShapeWorkspace() {
     const focus = typeof id === 'string' ? id : null;
     setBriefFocusId(focus); setCopied(false); setBrief(null);
     const node = snapshotRef.current.graph.nodes.find((item) => item.id === focus);
-    const draft = localDraft(`shape-map:discussion:${snapshotRef.current.mapPath}:${focus || 'all'}`, null)
+    const draft = localDraft(`shape-map:discussion:${api.storagePrefix}${snapshotRef.current.mapPath}:${focus || 'all'}`, null)
       || { problem: node?.proposal?.reason || '', purpose: node?.proposal?.purpose || '', successCriteria: node?.proposal?.successCriteria || '' };
     setRequestDraft({ ...draft, approved: false }); setDialog('brief');
     await generateBrief(focus, { ...draft, approved: false });
   }
   async function generateBrief(focus, request) {
     setCopied(false);
-    try { const response = await fetch('/api/brief', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus, ...request }) }); if (!response.ok) throw new Error(); const body = await response.json(); setBrief(body.text); }
+    try { const response = await fetch(api.url('/api/brief'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus, ...request }) }); if (!response.ok) throw new Error(); const body = await response.json(); setBrief(body.text); }
     catch { setBrief('논의 내용을 불러오지 못했습니다. 연결과 요청 내용을 확인해 주세요.'); }
   }
   function updateRequest(field, value) {
     const next = { ...requestDraft, [field]: value, approved: false }; setRequestDraft(next); setBrief(null); setCopied(false);
-    try { localStorage.setItem(`shape-map:discussion:${snapshotRef.current.mapPath}:${briefFocusId || 'all'}`, JSON.stringify(next)); } catch { /* The visible text remains editable. */ }
+    try { localStorage.setItem(`shape-map:discussion:${api.storagePrefix}${snapshotRef.current.mapPath}:${briefFocusId || 'all'}`, JSON.stringify(next)); } catch { /* The visible text remains editable. */ }
   }
   async function openRepository(id) {
     setRepositoryScopeId(typeof id === 'string' ? id : null);
     setDialog('repository'); setRepository(null);
-    try { const response = await fetch('/api/repository'); if (!response.ok) throw new Error(); setRepository(await response.json()); }
+    try { const response = await fetch(api.url('/api/repository')); if (!response.ok) throw new Error(); setRepository(await response.json()); }
     catch { setRepository({ connected: false, error: '변경 기록을 불러오지 못했습니다.' }); }
   }
   async function copyBrief() {
@@ -768,12 +769,12 @@ export default function ShapeWorkspace() {
     { label: '화면에 맞추기', icon: 'expand', action: fitDiagram },
   ];
   const results = search.trim() ? graph?.nodes.filter((node) => productArea.ids.has(node.id) && `${node.label} ${node.block?.summary || ''} ${node.task?.logic || ''}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 25) : [];
-  if (!snapshot) return <main className="sm-loading"><span className="sm-logo" /><h1>shape map</h1><p>{connection === 'offline' ? '지도를 불러오지 못했습니다.' : '제품 지도를 펼치고 있습니다.'}</p>{connection === 'offline' && <button className="sm-button" onClick={() => window.location.reload()}>다시 연결</button>}</main>;
-  return <main className={`shape-workspace sm-studio${sidebarOpen ? ' layers-open' : ''}${selectedTurn ? ' is-history' : ''}`}>
+  if (!snapshot) return <main className="sm-loading">{!embedded && <><span className="sm-logo" /><h1>shape map</h1></>}<p>{connection === 'offline' ? '지도를 불러오지 못했습니다.' : '제품 지도를 펼치고 있습니다.'}</p>{connection === 'offline' && <button className="sm-button" onClick={() => window.location.reload()}>다시 연결</button>}</main>;
+  return <main className={`shape-workspace sm-studio${embedded ? " is-embedded" : ""}${sidebarOpen ? ' layers-open' : ''}${selectedTurn ? ' is-history' : ''}`}>
     <header className="sm-topbar">
       <button className="sm-icon-button sm-layer-toggle" aria-label={sidebarOpen ? '레이어 패널 숨기기' : '레이어 패널 열기'} aria-pressed={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)}><ShapeIcon name="menu" size={17} /></button>
-      <a className="sm-brand" href="/" aria-label="Shape map 홈"><span className="sm-logo" /><span>shape map<span className="sm-brand__dot">.</span></span></a>
-      <span className="sm-project-name" title={snapshot.mapPath}>{root.label}</span>
+      {!embedded && <a className="sm-brand" href="/" aria-label="Shape map 홈"><span className="sm-logo" /><span>shape map<span className="sm-brand__dot">.</span></span></a>}
+      {(!embedded || title) && <span className="sm-project-name" title={snapshot.mapPath}>{embedded ? title : root.label}</span>}
       <div className="sm-topbar-legend" aria-label="상태별 기능 필터">{Object.entries(SHAPE_STATES).filter(([status]) => status !== 'neutral').map(([status, state]) => <button key={status} className={`sm-legend-item sm-legend-item--${status}`} aria-label={`${state.label} ${totals[status]}`} aria-pressed={filter === status} onClick={() => setFilter(filter === status ? null : status)}><span className="sm-state__dot" /><span>{state.short}</span><b>{totals[status]}</b></button>)}</div>
       <div className="sm-topbar__actions">
         <span className={`sm-save-state${connection !== 'online' || !snapshot.sourceStatus.valid ? ' is-offline' : ''}`} role="status"><span /><span>{!snapshot.sourceStatus.valid ? '원본 확인 필요' : busy ? '저장 중' : connection === 'online' ? '저장됨' : '연결 확인'}</span></span>
@@ -789,7 +790,7 @@ export default function ShapeWorkspace() {
         <div className="sm-layer-heading"><button onClick={() => focusNode(root.id)}><ShapeIcon name="grid" size={14} /><strong>레이어</strong><span>{productStates.length}</span></button><button className="sm-icon-button" aria-label="레이어 패널 닫기" onClick={() => setSidebarOpen(false)}><ShapeIcon name="close" size={14} /></button></div>
         <div className="sm-search"><ShapeIcon name="search" size={13} /><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="기능·ID 찾기" aria-label="기능 찾기" /><kbd>/</kbd></div>
         <ShapeLayers graph={graph} rootId={root.id} states={states} collapsedIds={effectiveCollapsed} selectedIds={selectionIds} onToggle={toggleNode} onSelect={selectLayer} onEdit={showNode} onFocus={focusNode} onMenu={menuAt} search={search} />
-        <div className="sm-sidebar__bottom"><button onClick={openRepository}><ShapeIcon name="history" size={14} />레포 변경 기록<ShapeIcon name="arrow" size={13} /></button><span className="sm-local-file" title={snapshot.mapPath}><ShapeIcon name="code" size={13} />{snapshot.mapPath.split('/').at(-1)}</span><a className="sm-legacy-editor" href="?editor=1">원본·고급 편집<ShapeIcon name="code" size={12} /></a></div>
+        <div className="sm-sidebar__bottom"><button onClick={openRepository}><ShapeIcon name="history" size={14} />레포 변경 기록<ShapeIcon name="arrow" size={13} /></button><span className="sm-local-file" title={snapshot.mapPath}><ShapeIcon name="code" size={13} />{snapshot.mapPath.split('/').at(-1)}</span><a className="sm-legacy-editor" href={api.editorHref}>원본·고급 편집<ShapeIcon name="code" size={12} /></a></div>
       </aside>}
       <section aria-label="무한 캔버스 제품 지도" className={`sm-stage${expandedCanvas ? ' is-expanded' : ''}`}>
         <h1 className="sm-sr-only">{currentFocus.label} 구성도</h1>
@@ -825,7 +826,7 @@ export default function ShapeWorkspace() {
           <div className="sm-timeline__track"><button className="sm-play" aria-label={playing ? '턴 재생 멈추기' : '개발 턴 재생'} disabled={!turns.length} onClick={() => { if (!playing) { setTurnId(turns[0].id); setSelectedId(null); } setPlaying(!playing); }}><ShapeIcon name={playing ? 'pause' : 'play'} size={15} /></button><div className="sm-turns">{turns.map((turn) => <button key={turn.id} className={`sm-turn${turnId === turn.id ? ' is-selected' : ''}`} onClick={() => chooseTurn(turn.id)}><span className="sm-turn__dot" /><span className="sm-turn__text"><b>턴 {turn.number}</b><span>{turn.title}</span></span><small>{dateText(turn.createdAt)}</small></button>)}<button className={`sm-turn sm-turn--current${!turnId ? ' is-selected' : ''}`} onClick={() => chooseTurn(null)}><span className="sm-turn__dot" /><span className="sm-turn__text"><b>현재</b><span>다음 변화를 준비 중</span></span></button></div></div>
           {turns.length > 0 && <label className="sm-timeline-slider"><span className="sm-sr-only">보고 있는 개발 턴</span><input type="range" min="0" max={turns.length} value={index} onChange={(event) => chooseTurn(turns[Number(event.target.value)]?.id || null)} aria-valuetext={selectedTurn ? `턴 ${selectedTurn.number}: ${selectedTurn.title}` : '현재 형상'} /></label>}
         </footer>}
-        {selected && <ShapeInspectorAnchor nodes={nodes} selectedId={selected.id} anchorId={shapeAncestors(graph, selected.id).reverse().find((item) => nodes.some((node) => node.id === item.id))?.id} canvasRef={canvasRef}><BlockInspector key={`${turnId || 'current'}:${selected.id}:${inspectorIntent?.key || ''}`} initialTab={inspectorIntent?.id === selected.id ? inspectorIntent.tab : 'overview'} initialEditing={inspectorIntent?.id === selected.id && inspectorIntent.edit} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={snapshot.mapPath} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={showNode} onRepository={openRepository} onBrief={() => openBrief(selected.id)} onDuplicate={() => duplicateSelected([selected.id])} onDelete={() => deleteSelected([selected.id])} /></ShapeInspectorAnchor>}
+        {selected && <ShapeInspectorAnchor nodes={nodes} selectedId={selected.id} anchorId={shapeAncestors(graph, selected.id).reverse().find((item) => nodes.some((node) => node.id === item.id))?.id} canvasRef={canvasRef}><BlockInspector key={`${turnId || 'current'}:${selected.id}:${inspectorIntent?.key || ''}`} initialTab={inspectorIntent?.id === selected.id ? inspectorIntent.tab : 'overview'} initialEditing={inspectorIntent?.id === selected.id && inspectorIntent.edit} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={`${api.storagePrefix}${snapshot.mapPath}`} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={showNode} onRepository={openRepository} onBrief={() => openBrief(selected.id)} onDuplicate={() => duplicateSelected([selected.id])} onDelete={() => deleteSelected([selected.id])} /></ShapeInspectorAnchor>}
       </section>
     </div>
     {menu && <ShapeContextMenu menu={menu} items={menuItems} onClose={() => setMenu(null)} />}

@@ -20,6 +20,7 @@
     "test:browser": "node scripts/browser-acceptance.mjs",
     "test:reparent-drag": "node scripts/reparent-drag-acceptance.mjs",
     "test:node-layout": "node scripts/node-layout-acceptance.mjs",
+    "test:project-shell": "node scripts/project-shell-acceptance.mjs",
     "test:watch": "vitest",
     "map": "node bin/mapctl.mjs"
   },
