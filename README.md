@@ -157,7 +157,12 @@ tabs: **기능 계통도**, **유저 플로우**, **시스템 플로우**, and *
 are written straight back to that repository's `.mmd` files; canvas state stays
 in Shape map's own `.state/` folder. A file Shape map cannot edit is drawn
 read-only with the reason and the line to fix, and becomes editable once fixed.
-Maps added or changed on disk appear without reloading. The address keeps the
+Maps added or changed on disk appear without reloading. **새 지도** creates a
+map from the app: choose its kind, give it a title and an optional one-line
+description, and Shape map writes a small starter file into `docs/maps/` and opens
+it. A repository without maps offers **첫 지도 만들기**, which also creates the
+folder. New files are numbered after the existing ones and never replace a file.
+The address keeps the
 open project and map, so links and back/forward work. Check maps without the
 app using `npm run map -- check path/to/docs/maps`, and rewrite them once in the
 canonical form Shape map writes using `npm run map -- format path/to/docs/maps`.

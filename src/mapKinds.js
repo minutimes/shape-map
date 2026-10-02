@@ -12,6 +12,39 @@ export function mapKindLabel(kind) {
   return MAP_KIND_LABELS[kind] || MAP_KIND_LABELS.other;
 }
 
+/** Kinds a person can create from the app, with one line on what each shows. */
+export const CREATABLE_MAP_KINDS = Object.freeze(['features', 'user-flow', 'system-flow']);
+export const MAP_KIND_HINTS = Object.freeze({
+  features: '제품이 할 수 있는 일을 가지처럼 나눠요.',
+  'user-flow': '사람마다 무엇을 어떤 순서로 하는지 그려요.',
+  'system-flow': '시스템이 어떤 순서로 돌아가는지 그려요.',
+});
+export const MAP_TITLE_EXAMPLES = Object.freeze({
+  features: '예: 동네 책장 기능',
+  'user-flow': '예: 책 빌리기',
+  'system-flow': '예: 대여 처리',
+});
+/** Same limits as the map header (docs/FORMAT.md "Project maps"), counted in characters. */
+export const MAP_TEXT_LIMITS = Object.freeze({ title: 80, description: 400 });
+
+export function textLength(value) {
+  return [...String(value ?? '')].length;
+}
+
+/** A short Korean reason for a failed create or rename request. */
+export function mapRequestReason(error) {
+  const code = error?.body?.code;
+  if (!error?.status) return 'Shape map에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.';
+  if (code === 'project_not_found') return '이 프로젝트를 찾을 수 없어요. 폴더가 옮겨졌을 수 있어요.';
+  if (code === 'map_not_found') return '이 지도 파일을 찾을 수 없어요. 옮겨지거나 지워졌을 수 있어요.';
+  if (code === 'maps_folder_unavailable') return 'docs/maps 폴더를 만들 수 없어요. 같은 이름의 파일이나 다른 곳을 가리키는 바로가기가 있는지 확인해 주세요.';
+  if (code === 'map_name_unavailable') return '새 파일 이름을 정하지 못했어요. docs/maps 폴더를 정리한 뒤 다시 해 주세요.';
+  if (code === 'revision_conflict') return '그사이 지도가 바뀌었어요. 한 번 더 저장해 주세요.';
+  if (code === 'read_only_map' || code === 'invalid_source') return '지금은 이 지도를 고칠 수 없어요. 파일의 틀린 줄을 먼저 고쳐 주세요.';
+  if (code === 'validation_error') return '이름이나 설명을 다시 확인해 주세요. 줄바꿈 없이 한 줄로 적어야 해요.';
+  return '요청을 마치지 못했어요. 잠시 뒤에 다시 해 주세요.';
+}
+
 /** What a lane is called in each flow kind. Change the words here only. */
 export const MAP_LANE_WORDS = Object.freeze({
   'user-flow': Object.freeze({ noun: '참여자', place: '참여자 줄' }),

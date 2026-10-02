@@ -75,6 +75,14 @@ export function createApiApp(store, { workspace = null } = {}) {
     }
   });
 
+  // Creating a map: a starter file in the project's docs/maps (see docs/API.md "Projects").
+  app.post('/api/project/maps', async (request, response, next) => {
+    try {
+      if (!workspace) throw projectNotFound();
+      response.status(201).json(await workspace.createMap(request.query.project, request.body));
+    } catch (error) { next(error); }
+  });
+
   app.get('/api/map', async (request, response, next) => {
     try { response.json(await (await mapStore(request)).getFreshSnapshot()); }
     catch (error) { next(error); }
