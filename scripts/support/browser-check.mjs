@@ -78,6 +78,8 @@ export async function startServer(env = {}, { port: fixedPort } = {}) {
     });
     child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => { output += chunk; });
+    const current = child;
+    process.once('exit', () => current.kill('SIGTERM')); // even when the check crashes
     await waitUntil(async () => {
       if (child.exitCode !== null) throw new Error(`server exited with ${child.exitCode}: ${output}`);
       return (await fetch(`${origin}/api/health`)).ok;

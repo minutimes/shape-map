@@ -116,7 +116,7 @@ async function run() {
   origin = server.origin;
   browser = await launchBrowser();
   report.browser = browser.version();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 820 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
   const page = await context.newPage();
@@ -147,9 +147,9 @@ async function run() {
   report.checks.initialRender = { productTitle: true, visualMetrics };
   await page.keyboard.press('Control+0');
   await page.waitForTimeout(220);
-  const overviewPath = path.join(evidenceDir, 'default-overview-1280.png');
+  const overviewPath = path.join(evidenceDir, 'default-overview-1440.png');
   await page.screenshot({ path: overviewPath, fullPage: true });
-  report.screenshots.defaultOverview = { path: path.relative(root, overviewPath), viewportWidth: 1280 };
+  report.screenshots.defaultOverview = { path: path.relative(root, overviewPath), viewportWidth: 1440 };
 
   // Canvas overlays collapse into one icon each, persist through reload, and
   // expand back into their original corners.
@@ -157,7 +157,7 @@ async function run() {
   await page.getByTestId('minimap-collapse-button').click();
   await page.getByTestId('legend').waitFor({ state: 'detached' });
   await page.getByTestId('rf__minimap').waitFor({ state: 'detached' });
-  const compactOverlaysPath = path.join(evidenceDir, 'compact-overlays-1280.png');
+  const compactOverlaysPath = path.join(evidenceDir, 'compact-overlays-1440.png');
   await page.screenshot({ path: compactOverlaysPath, fullPage: true });
   await page.reload({ waitUntil: 'networkidle' });
   await page.getByTestId('legend-expand-button').waitFor({ state: 'visible' });
@@ -173,7 +173,7 @@ async function run() {
   };
   report.screenshots.compactOverlays = {
     path: path.relative(root, compactOverlaysPath),
-    viewportWidth: 1280,
+    viewportWidth: 1440,
   };
 
   // Direct visual add, rename, presentation edit, and semantic reparent.
@@ -199,9 +199,9 @@ async function run() {
     inspector: inspectorCopiedNodeKey,
     rawStableId: true,
   };
-  const editorPath = path.join(evidenceDir, 'explicit-editor-1280.png');
+  const editorPath = path.join(evidenceDir, 'explicit-editor-1440.png');
   await page.screenshot({ path: editorPath, fullPage: true });
-  report.screenshots.explicitEditor = { path: path.relative(root, editorPath), viewportWidth: 1280 };
+  report.screenshots.explicitEditor = { path: path.relative(root, editorPath), viewportWidth: 1440 };
   await page.getByTestId('new-child-input').fill('브라우저 추가');
   await page.getByTestId('add-child-button').click();
   const added = await waitUntil(async () => {
@@ -475,14 +475,15 @@ async function run() {
   await openInspectorFor(page, 'planning');
   const renameInput = page.getByTestId('rename-input');
   await renameInput.click();
-  await page.keyboard.press('Meta+A');
+  // The platform's own select-all: Cmd+A on macOS, Ctrl+A elsewhere.
+  await page.keyboard.press('ControlOrMeta+A');
   const textSelection = await renameInput.evaluate((input) => ({
     start: input.selectionStart,
     end: input.selectionEnd,
     length: input.value.length,
   }));
   assert(textSelection.start === 0 && textSelection.end === textSelection.length,
-    'Meta+A was intercepted while a text input was focused.');
+    'Select-all was intercepted while a text input was focused.');
   report.checks.inputShortcutIsolation = textSelection;
 
   // Keyboard and pointer zoom/pan remain on the canvas.
@@ -598,13 +599,13 @@ async function run() {
   const expandedAllOverlap = await visibleNodeOverlap(page);
   assert(expandedAllOverlap.overlapPairs.length === 0,
     `Global expand left overlaps: ${JSON.stringify(expandedAllOverlap.overlapPairs)}`);
-  const expandedAllPath = path.join(evidenceDir, 'all-branches-expanded-1280.png');
+  const expandedAllPath = path.join(evidenceDir, 'all-branches-expanded-1440.png');
   await page.keyboard.press('Control+0');
   await page.waitForTimeout(260);
   await page.screenshot({ path: expandedAllPath, fullPage: true });
   report.screenshots.allBranchesExpanded = {
     path: path.relative(root, expandedAllPath),
-    viewportWidth: 1280,
+    viewportWidth: 1440,
   };
   report.checks.globalCollapseExpandPersistence = {
     collapsedBranchCount: expectedCollapsedIds.length,
@@ -705,8 +706,8 @@ async function run() {
   report.checks.restartPersistence = true;
 
   // Responsive visual evidence and explicit clipping bounds.
-  for (const width of [390, 768, 1280]) {
-    await page.setViewportSize({ width, height: 820 });
+  for (const [width, height] of [[390, 844], [1024, 768], [1440, 900]]) {
+    await page.setViewportSize({ width, height });
     await page.keyboard.press('Control+0');
     await page.waitForTimeout(220);
     await page.getByTestId('node-planning').click();
@@ -730,7 +731,7 @@ async function run() {
       return { label: button.getAttribute('aria-label'), x: rect.x, right: rect.right, y: rect.y, bottom: rect.bottom, width: rect.width, height: rect.height };
     }));
     assert(overlayControls.length === 2 && overlayControls.every((button) => (
-      button.x >= 0 && button.right <= width && button.y >= 0 && button.bottom <= 820
+      button.x >= 0 && button.right <= width && button.y >= 0 && button.bottom <= height
       && button.width >= 30 && button.height >= 30
     )), `Canvas overlay control is clipped at ${width}px: ${JSON.stringify(overlayControls)}`);
     const screenshotPath = path.join(evidenceDir, `${width}.png`);

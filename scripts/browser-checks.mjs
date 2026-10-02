@@ -57,6 +57,7 @@ function run(command, args, { logFile, timeout } = {}) {
     child.on('close', async (code, signal) => {
       clearTimeout(timer);
       running.delete(child);
+      stop(child); // a server or browser left behind by a crashed check
       if (timedOut) output += `\n[browser-checks] stopped after ${Math.round(timeout / 1000)}s without finishing.\n`;
       if (logFile) await fs.writeFile(logFile, output);
       resolve({ ok: code === 0 && !timedOut, code, signal, timedOut, output, seconds: (Date.now() - started) / 1000 });
