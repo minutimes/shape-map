@@ -4,7 +4,7 @@
 The editor deliberately supports a small Mermaid `flowchart` subset so every visual
 operation has an honest text round trip. A product repository can keep several
 maps of different kinds; see [Project maps](#project-maps) and
-[User flow maps](#user-flow-maps).
+[Flow maps](#flow-maps).
 
 ## Authoritative syntax
 
@@ -147,28 +147,31 @@ the folder can also hold notes for people.
 Each map names its kind in one header comment:
 
 ```text
-%% sm-map: {"kind":"user-flow","title":"방과 리그","description":"사람들이 방과 리그를 오가는 길"}
+%% sm-map: {"kind":"system-flow","title":"방 플로우","description":"방을 만들고 들어가고 다시 하는 흐름"}
 ```
 
 | Field | Rule |
 | --- | --- |
-| `kind` | Required. `features` (기능 계통도) or `user-flow` (유저 플로우). |
+| `kind` | Required: `features`, `user-flow`, or `system-flow`. |
 | `title` | Optional, 1–80 characters. The map's name in Shape map. |
 | `description` | Optional, up to 400 characters. One line shown with the title. |
+
+| Kind | Tab | What it shows | Contract |
+| --- | --- | --- | --- |
+| `features` | 기능 계통도 | What the product can do, as a feature tree | v1, above |
+| `user-flow` | 유저 플로우 | How each kind of participant moves through the product | [Flow maps](#flow-maps) |
+| `system-flow` | 시스템 플로우 | How the system runs: rooms, leagues, payments, servers | [Flow maps](#flow-maps) |
 
 Unknown properties are rejected, and a file has at most one header. The header
 may be on any line; Shape map writes it directly after the declaration lines.
 Without a header, a file in the v1 format above is a `features` map, so existing
 maps remain valid unchanged, and writers preserve the absence. Every other map
-needs a header.
+needs a header. The default title is the root label of a `features` map and the
+file name without `.mmd` for a flow map.
 
-A `features` map follows the v1 hierarchy contract above. A `user-flow` map
-follows the [user flow contract](#user-flow-maps). The default title is the root
-label of a `features` map and the file name without `.mmd` for a `user-flow` map.
-
-Shape map shows one tab per kind, in this order: 기능 계통도, 유저 플로우, then
-기타 그림. Within a tab, maps are ordered by file name, so a numeric prefix such
-as `01-rooms.mmd` sets their order.
+Shape map shows one tab per kind, in this order: 기능 계통도, 유저 플로우,
+시스템 플로우, then 기타 그림. Within a tab, maps are ordered by file name, so a
+numeric prefix such as `01-rooms.mmd` sets their order.
 
 A file that Shape map cannot edit is still listed: another Mermaid diagram type,
 a kind from a later version, or a file with an invalid line. It appears read-only
@@ -179,13 +182,20 @@ without a restart.
 Shape map writes only the `.mmd` files that a person edits. Canvas state for
 project maps stays in Shape map's local state directory, never in the project.
 
-## User flow maps
+## Flow maps
 
-A user flow map (유저 플로우) shows how each kind of participant moves through a
+User flows and system flows share one Mermaid flowchart subset.
+
+A **user flow** (유저 플로우) shows how each kind of participant moves through a
 product: what they do and in what order, which way they choose, where they hand
 something to another participant, and what they exchange. Participants are not
 only paying customers. A lane can be a consumer, a provider, a data provider, an
 operator, or an automated system.
+
+A **system flow** (시스템 플로우) shows how the system runs: how a room or a
+league is created, started, repeated, and closed, what happens when something
+fails, and which part does what. Its lanes are areas or components, such as a
+public server, a room server, or payments. A system flow may have no lanes.
 
 ```mermaid
 flowchart LR
@@ -234,38 +244,47 @@ flowchart LR
 
 Each statement is on its own line; blank lines are allowed.
 
-- **Declaration.** Exactly one `flowchart LR` and exactly one `%% sm-map:` header
-  with `"kind":"user-flow"`.
-- **Lanes (참여자 줄).** `subgraph ID["title"]`, the lane's steps, then `end`. A
-  lane is one kind of participant. Lanes do not nest, and only step declarations
-  may appear inside a lane. Lanes are shown top to bottom in declaration order.
-  A lane may be empty.
+- **Declaration.** Exactly one `flowchart LR`, `flowchart TB`, or `flowchart TD`,
+  and exactly one `%% sm-map:` header whose kind is `user-flow` or `system-flow`.
+  Shape map always lays lanes out as rows. The direction only changes how other
+  Mermaid viewers draw the file, and it is kept as written.
+- **Lanes.** `subgraph ID["title"]`, the lane's statements, then `end`. In a user
+  flow a lane is one kind of participant; in a system flow it is an area or a
+  component. Lanes do not nest. A lane may start with `direction LR`, `RL`, `TB`,
+  `TD`, or `BT`, which is kept as written. Lanes are shown top to bottom in
+  declaration order. A lane may be empty.
 - **Steps.** `ID["label"]` is an action, `ID(["label"])` is a start, an end, or a
   milestone, and `ID{"label"}` is a decision. A step declared inside a lane
   belongs to that lane; a step declared outside every lane is shared. Declaration
   order is the reading order wherever arrows do not already set one.
-- **Arrows.** Declared outside lanes, one per line:
+- **Arrows.**
   - `A --> B`: the next step.
   - `A -.-> B`: another way, an optional path, or a return.
-  - `A ==> B`: a handoff or exchange between participants, such as money, data,
-    content, or an invitation.
+  - `A ==> B`: a handoff or exchange between participants or parts, such as
+    money, data, content, or an invitation.
 
-  Any arrow may carry a label, as in `A -->|"label"| B`. Both ends must be
-  declared steps, not lanes, and must differ. At most one arrow joins the same
-  source and target, so that pair identifies the arrow. Arrows keep their
-  declaration order.
-- **Tags (표시).** `classDef NAME fill:#RRGGBB,stroke:#RRGGBB,color:#RRGGBB,stroke-width:Npx`
-  with exactly one `%% mlc-legend: NAME|label|description`. `class ID1,ID2 NAME`
-  puts the tag on steps or lanes. A step or lane can carry several tags, each at
-  most once. Tags describe places, exchanges, sides, or anything else the map
-  needs; Shape map shows them as chips and can highlight them. A tag may be
-  defined without being used.
+  Any arrow may carry a label, as in `A -->|"label"| B`. Arrows may be chained
+  between declared IDs, as in `A --> B -->|"label"| C`. Both ends of every arrow
+  must be declared steps, not lanes, and must differ. At most one arrow joins the
+  same source and target, so that pair identifies the arrow. Arrows keep their
+  declaration order. An arrow may appear inside a lane only when both of its ends
+  are steps already declared in that lane.
+- **Tags (표시).** `classDef NAME fill:#RRGGBB,stroke:#RRGGBB,color:#RRGGBB,stroke-width:Npx`,
+  optionally followed by `,stroke-dasharray:N M` with N and M from 1 to 40. A
+  dashed tag marks something undecided or something that is not a real step.
+  Each tag has exactly one `%% mlc-legend: NAME|label|description`.
+  `class ID1,ID2 NAME` puts the tag on steps or lanes, and several `class` lines
+  may name the same tag. A step or lane can carry several tags, each at most
+  once. Tags describe places, exchanges, sides, or anything else the map needs;
+  Shape map shows them as chips and can highlight them. A tag may be defined
+  without being used.
 - **Descriptions.** `%% sm-block: ID|{"summary":"text"}` on a step or lane. Only
-  `summary` is supported in user flow maps.
+  `summary` is supported in flow maps. A note about a step belongs here rather
+  than in a separate note box.
 
-Every other statement is rejected with its line number. This includes chained
-arrows (`A --> B --> C`), `&`, node declarations inside arrows, `style`,
-`linkStyle`, `click`, `direction`, other node shapes, and other comments.
+Every other statement is rejected with its line number. This includes `&`, node
+declarations inside arrows, links without an arrowhead (`---`, `-.-`), `style`,
+`linkStyle`, `click`, other node shapes, and other comments.
 
 ### Identifiers and text
 
@@ -277,15 +296,17 @@ arrows (`A --> B --> C`), `&`, node declarations inside arrows, `style`,
   cannot contain a double quote (`"`), because Mermaid cannot read it; use ‘ ’ or
   “ ” instead. Step labels have 1–200 characters, lane titles 1–80, arrow labels
   up to 120, and summaries up to 4,000. Shape map shows all text as plain text.
-- A user flow map has at most 50 lanes, 2,000 steps, 4,000 arrows, and 64 tags. A
+- A flow map has at most 50 lanes, 2,000 steps, 4,000 arrows, and 64 tags. A
   source file is at most 16 MiB.
 
 ### Canonical text
 
-Shape map writes user flow maps in this order: the declaration and header; each
-lane with its steps; shared steps; arrows; `classDef` lines; one `class` line per
-used tag, listing lanes and then steps in declaration order; summaries for lanes
-and then steps; and legends. It indents with two spaces, and four inside a lane.
-A valid file in another order is accepted as written. The first edit from Shape
-map rewrites it in canonical order without changing its meaning. Invalid user
-flow sources follow the same safety boundary as v1 maps: they are never rewritten.
+Shape map writes flow maps in this order: the declaration and header; each lane
+with its direction, if any, and its steps; shared steps; arrows, one per line;
+`classDef` lines; one `class` line per used tag, listing lanes and then steps in
+declaration order; summaries for lanes and then steps; and legends. It indents
+with two spaces, and four inside a lane. A valid file in another form, such as
+chained arrows, arrows inside a lane, or a tag split over several `class` lines,
+is accepted as written. The first edit from Shape map rewrites it in canonical
+form without changing its meaning. Invalid flow sources follow the same safety
+boundary as v1 maps: they are never rewritten.

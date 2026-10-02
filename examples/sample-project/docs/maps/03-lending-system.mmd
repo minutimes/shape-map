@@ -1,0 +1,47 @@
+flowchart TB
+  %% sm-map: {"kind":"system-flow","title":"대여 처리","description":"대여 요청을 받아 정산할 때까지 시스템이 하는 일"}
+  receive(["대여 요청 받기"])
+  stock{"빌려줄 수 있는 책이 있나?"}
+  notify_owner["책 주인에게 알림"]
+  wait_answer{"24시간 안에 답했나?"}
+  next_owner["다음 책 주인 찾기"]
+  charge["보증금 결제 요청"]
+  paid{"결제됐나?"}
+  hold["보증금 보관"]
+  handover["건네기 일정 알림"]
+  watch["반납 기한 지켜보기"]
+  returned{"기한 안에 돌아왔나?"}
+  remind["반납 알림 보내기"]
+  settle["대여료 정산"]
+  refund["보증금 돌려주기"]
+  done(["대여 끝"])
+  cancel(["요청 취소"])
+
+  receive --> stock
+  stock -->|"있어요"| notify_owner
+  stock -.->|"없어요"| cancel
+  notify_owner --> wait_answer
+  wait_answer -->|"수락"| charge
+  wait_answer -.->|"거절하거나 답이 없어요"| next_owner
+  next_owner -.-> stock
+  charge --> paid
+  paid -->|"네"| hold
+  paid -.->|"아니요"| cancel
+  hold --> handover
+  handover --> watch
+  watch --> returned
+  returned -->|"네"| settle
+  returned -.->|"아니요"| remind
+  remind -.-> watch
+  settle --> refund
+  refund --> done
+
+  classDef money fill:#FFF1DB,stroke:#B86E00,color:#5C3700,stroke-width:1px
+  classDef open fill:#FFF8DB,stroke:#8A6D00,color:#4A3B00,stroke-width:1px,stroke-dasharray:4 3
+  class charge,hold,settle,refund money
+  class next_owner open
+
+  %% sm-block: next_owner|{"summary":"아직 정하지 않았어요. 몇 명까지 다시 찾을지 정해야 해요."}
+
+  %% mlc-legend: money|돈|돈이 오가는 단계
+  %% mlc-legend: open|미정|아직 정하지 않은 것
