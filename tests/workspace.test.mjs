@@ -48,6 +48,8 @@ async function setup({ watchFiles = false } = {}) {
   // A worktree nested elsewhere inside the root, with maps.
   await fs.mkdir(path.join(root, 'trees'));
   git(sample, 'worktree', 'add', '-q', '-b', 'feature/rooms', path.join(root, 'trees', 'rooms'));
+  // A worktree directly inside the root is named after its repository.
+  git(sample, 'worktree', 'add', '-q', '-b', 'direct', path.join(root, 'sample-direct'));
   // A repository without maps, a plain folder, and a symlink leaving the root.
   await fs.mkdir(path.join(root, 'empty'));
   git(path.join(root, 'empty'), 'init', '-q');
@@ -86,6 +88,7 @@ describe('project discovery', () => {
     expect(body.projects).toEqual([
       { key: 'empty', name: 'empty', branch: 'main', worktree: false, mapCount: 0 },
       { key: 'sample', name: 'sample', branch: 'main', worktree: false, mapCount: 4 },
+      { key: 'sample-direct', name: 'sample', branch: 'direct', worktree: true, mapCount: 4 },
       { key: 'trees/rooms', name: 'sample', branch: 'feature/rooms', worktree: true, mapCount: 4 },
     ]);
     const single = createApiApp(legacy);
