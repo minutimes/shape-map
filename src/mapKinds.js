@@ -98,7 +98,7 @@ const LINE_REASONS = [
   [/instead of &/, '연결선 하나에 여러 단계를 묶었어요.'],
   [/unsupported arrow/, '읽을 수 없는 화살표예요. -->, -.->, ==> 중 하나를 써 주세요.'],
   [/JSON-quoted/, '글을 큰따옴표로 바르게 감싸지 않았어요.'],
-  [/descriptions support only summary|step blocks support|description must be a JSON|duplicate description|needs a summary/, '단계 설명 줄의 형식이 맞지 않아요.'],
+  [/descriptions support only summary|step blocks support|lane blocks support|description must be a JSON|duplicate description|needs a summary/, '단계 설명 줄의 형식이 맞지 않아요.'],
   [/invalid .*color|stroke width|cannot contain \| or a newline|undefined tag|Tag does not exist|classDef/, '표시를 정한 줄이 맞지 않아요.'],
   [/flowchart (LR|declaration)|one flowchart/, '첫 줄에 flowchart LR, TB, TD 중 하나가 있어야 해요.'],
   [/map header|map kind|Map title|Map description|sm-map/, '지도 종류를 적은 첫머리 줄이 맞지 않아요.'],

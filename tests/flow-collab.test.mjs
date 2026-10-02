@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyFlowOperation, parseFlowMap, writeFlowMap } from '../lib/flowMap.mjs';
-import { flowStepFingerprint, flowStepState, flowStepStates } from '../lib/flowState.mjs';
+import { flowLaneState, flowLaneStates, flowStepFingerprint, flowStepState, flowStepStates, flowTurnView } from '../lib/flowState.mjs';
 import { flowDiscussionBrief } from '../lib/discussion.mjs';
 
 const sample = (name) => fs.readFileSync(new URL(`../examples/sample-project/docs/maps/${name}`, import.meta.url), 'utf8');
@@ -188,6 +188,79 @@ describe('flow collaboration operations', () => {
   });
 });
 
+describe('lane memos', () => {
+  it('stores memos on a lane, resolves them, and turns the lane yellow only for an open concern', () => {
+    let graph = run(parseFlowMap(lending), { type: 'addComment', id: 'owner', body: '책 주인 답이 늦어요', kind: 'concern', author: '사람' });
+    const lane = graph.lanes.find((item) => item.id === 'owner');
+    expect(lane.comments[0]).toMatchObject({ body: '책 주인 답이 늦어요', kind: 'concern' });
+    expect(flowLaneState(lane)).toMatchObject({ status: 'concern', concernCount: 1 });
+    // A lane memo does not change any step's content or review.
+    expect(flowStepStates(graph).get('owner_check').fingerprint).toBe(flowStepStates(parseFlowMap(lending)).get('owner_check').fingerprint);
+    const source = writeFlowMap(graph);
+    expect(source).toMatch(/%% sm-block: owner\|\{"comments":\[/);
+    expect(parseFlowMap(source)).toEqual(graph);
+    graph = run(graph, { type: 'resolveComment', id: 'owner', commentId: lane.comments[0].id });
+    expect(flowLaneStates(graph).get('owner').status).toBe('neutral');
+    graph = run(graph, { type: 'addComment', id: 'owner', body: '설명 더 필요', kind: 'note', author: '사람' });
+    expect(flowLaneStates(graph).get('owner')).toMatchObject({ status: 'neutral', unresolvedCount: 1 });
+    // A lane keeps only memos: no proposal, review, or feature links.
+    expect(() => run(graph, { type: 'setProposal', id: 'owner', proposal: { reason: 'x' } })).toThrow(/Step does not exist/);
+    expect(() => parseFlowMap(flow('  subgraph l["L"]\n  end\n  %% sm-block: l|{"features":[{"map":"a.mmd","id":"b"}]}\n'))).toThrow(/lane blocks support only summary and comments/);
+  });
+
+  it('brings new lane memos into the map brief and focuses a lane on request', () => {
+    let graph = run(parseFlowMap(lending), { type: 'createTurn', title: '처음' });
+    graph = run(graph, { type: 'addComment', id: 'platform', body: '정산 시점이 모호해요', kind: 'concern', author: '사람' });
+    const snapshot = { mapPath: 'docs/maps/02-lending.mmd', revision: 'r', graph };
+    expect(flowDiscussionBrief(snapshot).text).toContain('[platform] 플랫폼 · 줄\n- 사람 메모: 정산 시점이 모호해요');
+    const focused = flowDiscussionBrief(snapshot, 'platform').text;
+    expect(focused).toContain('범위: 줄 [platform] 플랫폼');
+    expect(focused).toContain('이 줄의 단계: [platform_fill]');
+  });
+});
+
+describe('reading a recorded turn', () => {
+  function history() {
+    let graph = run(parseFlowMap(lending), { type: 'createTurn', title: '처음' });
+    graph = run(graph, { type: 'updateStep', id: 'owner_list', label: '내 책 올리기' });
+    graph = run(graph, { type: 'addStep', lane: 'reader', label: '추천 보기', id: 'reader_pick', after: 'reader_search' });
+    graph = run(graph, { type: 'deleteSteps', ids: ['reader_review'] });
+    graph = run(graph, { type: 'setProposal', id: 'reader_wait', proposal: { reason: '늦어요' } });
+    graph = run(graph, { type: 'createTurn', title: '고르기' });
+    graph = run(graph, { type: 'updateStep', id: 'reader_search', label: '책 고르기' });
+    return graph;
+  }
+
+  it('shows the first turn without inventing earlier changes', () => {
+    const graph = history();
+    const view = flowTurnView(graph.turns[0], { previous: null, live: graph, compare: 'previous' });
+    expect([...view.states.values()].some((state) => state.status === 'changed')).toBe(false);
+    expect(view.base).toBe(false);
+    expect(view.graph.steps.find((step) => step.id === 'owner_list').label).toBe('책 올리기');
+  });
+
+  it('marks blue only the differences between two recorded turns, keeping recorded colors first', () => {
+    const graph = history();
+    const view = flowTurnView(graph.turns[1], { previous: graph.turns[0], live: graph, compare: 'previous' });
+    expect(view.states.get('owner_list')).toMatchObject({ status: 'changed', changes: ['label'] });
+    expect(view.states.get('reader_pick')).toMatchObject({ status: 'changed', added: true });
+    expect(view.states.get('reader_wait').status).toBe('planned');
+    expect(view.states.get('owner_payout').status).toBe('neutral');
+    expect(view.removed.map((step) => step.id)).toEqual(['reader_review']);
+    // The turn shows the map as recorded, not the live label.
+    expect(view.graph.steps.find((step) => step.id === 'reader_search').label).toBe('읽고 싶은 책 찾기');
+  });
+
+  it('compares a turn with the live map without calling it blue', () => {
+    const graph = history();
+    const view = flowTurnView(graph.turns[0], { previous: null, live: graph, compare: 'current' });
+    expect([...view.states.values()].some((state) => state.status === 'changed')).toBe(false);
+    expect(view.states.get('owner_list')).toMatchObject({ differs: true, mark: '지금과 다름', changes: ['label'] });
+    expect(view.states.get('reader_review')).toMatchObject({ differs: true, mark: '지금은 없음' });
+    expect(view.removed.map((step) => step.id)).toEqual(['reader_pick']);
+  });
+});
+
 describe('flow discussion brief', () => {
   function recorded() {
     let graph = run(parseFlowMap(lending), { type: 'addComment', id: 'reader_open', body: '이미 기록한 메모', kind: 'note', author: '사람' });
@@ -231,6 +304,6 @@ describe('flow discussion brief', () => {
     expect(result.text).not.toContain('[owner_check]');
     expect(result.text).toContain('사용자가 위 요청을 승인했습니다');
     expect(result.approved).toBe(true);
-    expect(() => flowDiscussionBrief(source, 'missing')).toThrow(/step does not exist/);
+    expect(() => flowDiscussionBrief(source, 'missing')).toThrow(/step or lane does not exist/);
   });
 });

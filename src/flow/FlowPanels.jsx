@@ -8,7 +8,7 @@ import { DraftField, PanelSection, Segmented } from './FlowFields.jsx';
 import { TagChip } from './FlowElements.jsx';
 import FlowIcon from './FlowIcon.jsx';
 import { draftKey } from './flowDrafts.js';
-import { CommentsTab, FeaturesTab, ProposalTab, StepStatus } from './FlowCollab.jsx';
+import { CommentsTab, FeaturesTab, LaneStatus, ProposalTab, StepStatus } from './FlowCollab.jsx';
 
 export function PanelHeader({ eyebrow, title, onClose }) {
   return <header className="fm-panel__header">
@@ -44,11 +44,15 @@ function Confirm({ text, action, onConfirm, onCancel }) {
 const STEP_TABS = [['content', '내용'], ['comments', '메모'], ['proposal', '수정안'], ['features', '기능']];
 
 /** A step's content, memos, proposal, and feature links, with its color and review on top. */
-export function StepPanel({ step, graph, words, editable, act, focusLabel, state, links, tab = 'content', onTab }) {
+/**
+ * A step's content, memos, proposal, and feature links, with its color and review on top.
+ * `turn` is set while reading a recorded turn: everything is read-only then.
+ */
+export function StepPanel({ step, graph, words, editable, act, focusLabel, state, links, tab = 'content', onTab, turn = null }) {
   const [seed, setSeed] = useState(null);
   const count = { comments: (step.comments || []).filter((comment) => !comment.resolved).length, features: (step.features || []).length, proposal: step.proposal !== undefined ? '•' : 0 };
   return <>
-    <PanelHeader eyebrow={`단계 · ${laneTitle(graph, step.lane, words.shared)}`} title={step.label} onClose={act.close} />
+    <PanelHeader eyebrow={`${turn ? `턴 ${turn.number} 기록 · ` : ''}단계 · ${laneTitle(graph, step.lane, words.shared)}`} title={step.label} onClose={act.close} />
     {state && <StepStatus step={step} state={state} editable={editable} act={act} />}
     <div className="fm-tabs" role="tablist" aria-label="단계 정보">
       {STEP_TABS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`fm-tab-${id}`} onClick={() => onTab(id)}>
@@ -60,7 +64,7 @@ export function StepPanel({ step, graph, words, editable, act, focusLabel, state
       {tab === 'proposal' && <ProposalTab step={step} editable={editable} act={act} seed={seed} onSeedUsed={() => setSeed(null)} />}
       {tab === 'features' && <FeaturesTab step={step} editable={editable} act={act} links={links} />}
     </div>}
-    <footer className="fm-panel__footer"><button type="button" className="fm-button fm-button--small" onClick={() => act.openBrief(step.id)} data-testid="fm-step-brief"><FlowIcon name="mail" size={13} />AI에 전달</button></footer>
+    {!turn && <footer className="fm-panel__footer"><button type="button" className="fm-button fm-button--small" onClick={() => act.openBrief(step.id)} data-testid="fm-step-brief"><FlowIcon name="mail" size={13} />AI에 전달</button></footer>}
   </>;
 }
 
@@ -160,14 +164,29 @@ export function ArrowPanel({ arrow, graph, editable, act }) {
   </>;
 }
 
-export function LanePanel({ lane, graph, words, editable, act, focusLane, focusLabel }) {
+/** A lane's name, description, tags, and order, and its memos. Lanes take memos only. */
+export function LanePanel({ lane, graph, words, editable, act, focusLane, focusLabel, state, tab = 'content', onTab, turn = null }) {
+  const memoCount = (lane.comments || []).filter((comment) => !comment.resolved).length;
+  return <>
+    <PanelHeader eyebrow={`${turn ? `턴 ${turn.number} 기록 · ` : ''}${words.lane}`} title={lane.title} onClose={act.close} />
+    {state && <LaneStatus state={state} />}
+    <div className="fm-tabs" role="tablist" aria-label={`${words.lane} 정보`}>
+      {[['content', '내용'], ['comments', '메모']].map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`fm-lane-tab-${id}`} onClick={() => onTab(id)}>
+        {label}{id === 'comments' && memoCount ? <span className="fm-tabs__count">{memoCount}</span> : null}</button>)}
+    </div>
+    {tab === 'comments' ? <div className="fm-panel__body" role="tabpanel"><CommentsTab step={lane} targetKind="lane" editable={editable} act={act} /></div>
+      : <LaneContent lane={lane} graph={graph} words={words} editable={editable} act={act} focusLane={focusLane} focusLabel={focusLabel} />}
+    {!turn && <footer className="fm-panel__footer"><button type="button" className="fm-button fm-button--small" onClick={() => act.openBrief(lane.id)} data-testid="fm-lane-brief"><FlowIcon name="mail" size={13} />AI에 전달</button></footer>}
+  </>;
+}
+
+function LaneContent({ lane, graph, words, editable, act, focusLane, focusLabel }) {
   const [confirming, setConfirming] = useState(false);
   const plan = deleteLanePlan(graph, lane.id);
   const index = graph.lanes.findIndex((item) => item.id === lane.id);
   useEffect(() => { setConfirming(false); }, [lane.id]);
   return <>
-    <PanelHeader eyebrow={words.lane} title={lane.title} onClose={act.close} />
-    <div className="fm-panel__body">
+    <div className="fm-panel__body" role="tabpanel">
       <DraftField key={`${lane.id}-title`} store={act.drafts} draftKey={draftKey('lane', lane.id, 'title')} label="이름" value={lane.title} limit={TEXT_LIMITS.lane} disabled={!editable} autoFocus={focusLabel} testId="fm-lane-title"
         clean={(text) => cleanLabel(text, TEXT_LIMITS.lane)} onCommit={(title) => act.send({ type: 'updateLane', id: lane.id, title }, `${words.lane} 이름 바꾸기`)} />
       <DraftField key={`${lane.id}-summary`} store={act.drafts} draftKey={draftKey('lane', lane.id, 'summary')} label="설명" value={lane.summary || ''} multiline allowEmpty limit={TEXT_LIMITS.summary} disabled={!editable}
