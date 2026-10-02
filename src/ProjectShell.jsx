@@ -16,10 +16,13 @@ function readRoute() {
   return { project: params.get('project') || null, map: params.get('map') || null };
 }
 
-function routeUrl({ project, map }) {
+/** `open` (a feature) and `step` (a flow step) are read once by the opened map. */
+function routeUrl({ project, map, open, step }) {
   const params = new URLSearchParams();
   if (project) params.set('project', project);
   if (project && map) params.set('map', map);
+  if (project && map && open) params.set('open', open);
+  if (project && map && step) params.set('step', step);
   const query = params.toString();
   return query ? `/?${query}` : '/';
 }
@@ -152,9 +155,13 @@ function ProjectView({ projectKey, mapFile, navigate }) {
   const editable = editableLatch.current.editable;
 
   const api = useMemo(() => (mapFile ? createMapApi({ project: projectKey, map: mapFile }) : null), [projectKey, mapFile]);
-  const flowApi = useMemo(() => api && { readMap: api.readMap, mutateMap: api.mutateMap, eventsUrl: api.eventsUrl }, [api]);
+  const flowApi = useMemo(() => api && { readMap: api.readMap, mutateMap: api.mutateMap, eventsUrl: api.eventsUrl, requestBrief: api.requestBrief, readLinks: api.readLinks }, [api]);
+  // Flow steps and features link to each other across maps of this project.
+  const openFeature = useCallback((file, id) => navigate({ project: projectKey, map: file, open: id }), [navigate, projectKey]);
+  const openStep = useCallback((file, id) => navigate({ project: projectKey, map: file, step: id }), [navigate, projectKey]);
   const flowMap = useMemo(() => current && { project: projectKey, file: current.file, kind: current.kind, title: current.title,
-    description: current.description, editable: current.editable }, [projectKey, current?.file, current?.kind, current?.title, current?.description, current?.editable]);
+    description: current.description, editable: current.editable, onOpenFeature: openFeature }, [projectKey, current?.file, current?.kind, current?.title, current?.description, current?.editable, openFeature]);
+  const flowLinks = useMemo(() => api?.readLinks && current && { read: api.readLinks, mapFile: current.file, openStep }, [api, current?.file, openStep]);
 
   const projectName = state.project?.name || projectKey;
   useEffect(() => { document.title = current ? `${current.title} · ${projectName}` : `${projectName} · Shape map`; }, [current?.title, projectName]);
@@ -188,7 +195,7 @@ function ProjectView({ projectKey, mapFile, navigate }) {
   }
   else if (!current) content = mapFile ? <EmptyState title="이 지도를 찾을 수 없어요." text="파일이 옮겨지거나 지워졌을 수 있어요. 위에서 다른 지도를 골라 주세요." /> : <Loading />;
   else if (editable && current.kind === 'features') {
-    content = <ShapeWorkspace key={mapKey} api={api} embedded title={showChips ? null : current.title} />;
+    content = <ShapeWorkspace key={mapKey} api={api} embedded title={showChips ? null : current.title} flowLinks={flowLinks} />;
   } else if (editable && FLOW_MAP_KINDS.includes(current.kind)) {
     content = <Suspense fallback={<Loading />}><FlowWorkspace key={mapKey} api={flowApi} map={flowMap} /></Suspense>;
   } else {
