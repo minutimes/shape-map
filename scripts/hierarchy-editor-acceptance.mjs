@@ -18,6 +18,7 @@ let mapPath;
 let origin;
 let server;
 let browser;
+let page;
 const report = { checks: {}, screenshots: {} };
 const browserDiagnostics = [];
 
@@ -119,7 +120,7 @@ async function run() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
-  const page = await context.newPage();
+  page = await context.newPage();
   page.on('pageerror', (error) => browserDiagnostics.push(`pageerror:${error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') browserDiagnostics.push(`console:${message.text()}`);
@@ -754,6 +755,7 @@ async function run() {
 try {
   await run();
 } catch (error) {
+  await page?.screenshot({ path: path.join(evidenceDir, 'failure.png') }).catch(() => {});
   if (browserDiagnostics.length) error.message += `\nbrowser: ${browserDiagnostics.join(' | ')}`;
   throw error;
 } finally {
