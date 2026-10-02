@@ -129,7 +129,8 @@ function FlowStudio({ api, map }) {
   const graph = snapshot?.graph || null;
   const safeGraph = graph || EMPTY_GRAPH;
   const invalid = snapshot && snapshot.sourceStatus?.valid === false ? snapshot.sourceStatus : null;
-  const editable = Boolean(snapshot && graph && map?.editable !== false && snapshot.editable !== false && !invalid);
+  // The map's own live snapshot decides; the project list can lag behind it.
+  const editable = Boolean(snapshot && graph && snapshot.editable !== false && !invalid);
   const editableRef = useRef(editable); editableRef.current = editable;
 
   const notify = useCallback((text, error = false) => setToast({ text, error }), []);
