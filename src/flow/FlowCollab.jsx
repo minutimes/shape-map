@@ -34,13 +34,13 @@ export function StateBadge({ status, compact = false }) {
   return <span className={`fm-state fm-state--${status}${compact ? ' is-compact' : ''}`} title={state.meaning}><i aria-hidden="true" />{state.label}</span>;
 }
 
-/** Counts of the derived colors on the map; only colors in use are shown. */
-export function StateLegend({ states }) {
+/** Counts of the derived colors on the map, steps and lanes together; only colors in use are shown. */
+export function StateLegend({ states, laneStates }) {
   const totals = useMemo(() => {
     const counts = {};
-    for (const state of states.values()) if (state.status !== 'neutral') counts[state.status] = (counts[state.status] || 0) + 1;
+    for (const state of [...states.values(), ...(laneStates?.values() || [])]) if (state.status !== 'neutral') counts[state.status] = (counts[state.status] || 0) + 1;
     return counts;
-  }, [states]);
+  }, [states, laneStates]);
   const used = STATE_ORDER.filter((status) => totals[status]);
   if (!used.length) return null;
   return <span className="fm-state-legend" aria-label="색이 뜻하는 것" data-testid="fm-state-legend">
@@ -53,6 +53,32 @@ function InlineConfirm({ text, hint, action, actionClass = 'fm-button--dark', on
     <p><strong>{text}</strong>{hint && <span>{hint}</span>}</p>
     <div><button type="button" className={`fm-button ${actionClass}`} onClick={onConfirm} autoFocus>{action}</button>
       <button type="button" className="fm-button" onClick={onCancel}>그만두기</button></div>
+  </div>;
+}
+
+/** A lane takes memos only; an open concern is the one color it can have. */
+export function LaneStatus({ state }) {
+  return <section className="fm-status" data-testid="fm-lane-status"><div className="fm-status__row">
+    {state.status === 'concern' ? <StateBadge status="concern" /> : <span className="fm-state fm-state--neutral"><i aria-hidden="true" />풀리지 않은 걱정이 없어요</span>}
+  </div></section>;
+}
+
+/** While reading a recorded turn: how this step differs from the comparison. */
+function TurnDifference({ state, step }) {
+  if (!state.compare) return null;
+  const previous = state.compare === 'previous';
+  if (!state.base) return <p className="fm-muted">첫 턴이라 비교할 이전 기록이 없어요.</p>;
+  if (state.added) return <p className="fm-muted">{previous ? '이 턴에서 새로 생긴 단계예요.' : '지금 지도에는 없는 단계예요.'}</p>;
+  if (!state.changes.length) return <p className="fm-muted">{previous ? '이전 턴과 같아요.' : '지금 지도와 같아요.'}</p>;
+  const before = state.before;
+  const [from, to] = previous ? [before, step] : [step, before];
+  const [fromName, toName] = previous ? ['이전 턴', '이 턴'] : ['이 턴', '지금'];
+  return <div className="fm-diff" data-testid="fm-turn-diff">
+    <p className="fm-muted">{previous ? '이전 턴에서 바뀐 것' : '지금 지도와 다른 것'}: {state.changes.map((field) => CHANGE_NAMES[field]).join(', ')}</p>
+    {['label', 'summary'].filter((field) => state.changes.includes(field)).map((field) => <dl key={field} className="fm-diff__pair">
+      <div><dt>{fromName} {CHANGE_NAMES[field]}</dt><dd>{from?.[field] || '없음'}</dd></div>
+      <div><dt>{toName} {CHANGE_NAMES[field]}</dt><dd>{to?.[field] || '없음'}</dd></div>
+    </dl>)}
   </div>;
 }
 
@@ -72,7 +98,8 @@ export function StepStatus({ step, state, editable, act }) {
           title={step.proposal !== undefined ? '수정안을 정리한 뒤 검수할 수 있어요' : '지금 내용을 직접 확인했다고 남겨요'}>
           <FlowIcon name="check" size={13} />직접 확인했어요</button>)}
     </div>
-    {state.status === 'changed' && <p className="fm-muted">{state.addedInLastTurn ? '마지막 턴에서 새로 생긴 단계예요.' : `마지막 턴에서 바뀐 것: ${state.lastTurnChanges.map((field) => CHANGE_NAMES[field]).join(', ')}`}</p>}
+    <TurnDifference state={state} step={step} />
+    {state.status === 'changed' && !state.compare && <p className="fm-muted">{state.addedInLastTurn ? '마지막 턴에서 새로 생긴 단계예요.' : `마지막 턴에서 바뀐 것: ${state.lastTurnChanges.map((field) => CHANGE_NAMES[field]).join(', ')}`}</p>}
     {staleReview && !verified && <p className="fm-muted">확인한 뒤 내용이 바뀌었어요. 다시 확인해 주세요.</p>}
     {editable && step.proposal !== undefined && !verified && <p className="fm-muted">수정안을 정리한 뒤 검수할 수 있어요.</p>}
     {confirming && <InlineConfirm text="이 단계를 직접 확인했나요?" hint="초록색은 사람이 확인한 단계에만 붙어요. 단계 내용이 바뀌면 검수가 풀려요." action="직접 확인했어요"
@@ -86,8 +113,9 @@ function useDraft(store, key, fallback = '') {
   return [draft ? draft.value : fallback, (value) => (value === fallback && !draft?.message ? store.clear(key) : store.set(key, { value, status: 'editing', message: null })), () => store.clear(key)];
 }
 
-export function CommentsTab({ step, editable, act, onToProposal }) {
-  const [body, setBody, clearBody] = useDraft(act.drafts, draftKey('step', step.id, 'memo'));
+/** Memos on a step or, with `targetKind="lane"`, on a lane. */
+export function CommentsTab({ step, editable, act, onToProposal, targetKind = 'step' }) {
+  const [body, setBody, clearBody] = useDraft(act.drafts, draftKey(targetKind, step.id, 'memo'));
   const [kind, setKind] = useState('note');
   const [busy, setBusy] = useState(false);
   const comments = step.comments || [];
@@ -101,13 +129,13 @@ export function CommentsTab({ step, editable, act, onToProposal }) {
     if (result.ok) { clearBody(); setKind('note'); }
   }
   return <>
-    <p className="fm-muted">이 단계를 보며 든 생각을 남겨요. 걱정되는 점은 지도에 노란색으로 보여요.</p>
+    <p className="fm-muted">{targetKind === 'lane' ? '이 줄 전체에 대한 생각을 남겨요.' : '이 단계를 보며 든 생각을 남겨요.'} 걱정되는 점은 지도에 노란색으로 보여요.</p>
     <ul className="fm-comments" data-testid="fm-comments">
       {comments.length ? [...comments].reverse().map((comment) => <li key={comment.id} className={`fm-comment fm-comment--${comment.kind}${comment.resolved ? ' is-resolved' : ''}`}>
         <header><span className="fm-comment__kind">{COMMENT_NAMES[comment.kind]}</span><small>{comment.author} · {dateText(comment.createdAt)}{comment.resolved ? ' · 마침' : ''}</small></header>
         <p>{comment.body}</p>
         {editable && <footer>
-          {comment.kind === 'change' && !comment.resolved && <button type="button" onClick={() => onToProposal(comment.body)}>수정안으로 옮기기</button>}
+          {comment.kind === 'change' && !comment.resolved && onToProposal && <button type="button" onClick={() => onToProposal(comment.body)}>수정안으로 옮기기</button>}
           <button type="button" onClick={() => act.send({ type: 'resolveComment', id: step.id, commentId: comment.id, resolved: !comment.resolved }, comment.resolved ? '메모 다시 열기' : '메모 논의 마침')}>
             {comment.resolved ? '다시 열기' : '논의 마침'}</button>
         </footer>}
@@ -120,7 +148,7 @@ export function CommentsTab({ step, editable, act, onToProposal }) {
       <label className="fm-sr-only" htmlFor={`fm-memo-${step.id}`}>메모</label>
       <textarea id={`fm-memo-${step.id}`} value={body} maxLength={TEXT_LIMITS.summary} rows={3} placeholder="어떤 점을 함께 살펴볼까요?" data-testid="fm-memo-input"
         onChange={(event) => setBody(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) submit(event); }} />
-      <div className="fm-row"><small className="fm-muted fm-grow">{body ? '쓰던 메모는 다른 단계를 봐도 남아 있어요.' : '단계와 함께 지도 파일에 저장돼요.'}</small>
+      <div className="fm-row"><small className="fm-muted fm-grow">{body ? '쓰던 메모는 다른 곳을 봐도 남아 있어요.' : '지도 파일에 함께 저장돼요.'}</small>
         <button type="submit" className="fm-button fm-button--dark" disabled={!body.trim() || busy} data-testid="fm-memo-submit"><FlowIcon name="plus" size={13} />메모 남기기</button></div>
     </form>}
   </>;
@@ -246,8 +274,8 @@ export function FeaturesTab({ step, editable, act, links }) {
   </>;
 }
 
-/** Recorded turns of the map, and recording a new one. */
-export function TurnsPanel({ graph, editable, act, header }) {
+/** Recorded turns of the map, and recording a new one. Each turn can be read on the canvas. */
+export function TurnsPanel({ graph, editable, act, header, viewing = null }) {
   const [title, setTitle] = useState('');
   const [summary, setSummary] = useState('');
   const [busy, setBusy] = useState(false);
@@ -273,10 +301,12 @@ export function TurnsPanel({ graph, editable, act, header }) {
         <small className="fm-muted">기록하면 되돌리기 기록은 새로 시작돼요.</small>
       </form>}
       <PanelSection title={turns.length ? `기록한 턴 ${turns.length}개` : '기록한 턴'}>
-        {turns.length ? <ol className="fm-turns" data-testid="fm-turn-list">{[...turns].reverse().map((turn) => <li key={turn.id}>
+        {turns.length ? <ol className="fm-turns" data-testid="fm-turn-list">{[...turns].reverse().map((turn) => <li key={turn.id} className={viewing === turn.id ? 'is-viewing' : undefined}>
           <header><b>턴 {turn.number}</b><span>{turn.title}</span><small>{dateText(turn.createdAt)}</small></header>
           {turn.summary && <p>{turn.summary}</p>}
-          <small className="fm-muted">단계 {turn.steps.length}개 · 화살표 {turn.arrows.length}개</small>
+          <div className="fm-turns__foot"><small className="fm-muted">단계 {turn.steps.length}개 · 화살표 {turn.arrows.length}개</small>
+            {viewing === turn.id ? <span className="fm-turns__now">지금 보는 중</span>
+              : <button type="button" className="fm-button fm-button--small" onClick={() => act.viewTurn(turn.id)} data-testid={`fm-view-turn-${turn.number}`}><FlowIcon name="eye" size={13} />이 턴 보기</button>}</div>
         </li>)}</ol> : <p className="fm-muted">아직 기록한 턴이 없어요.</p>}
       </PanelSection>
     </div>
@@ -284,6 +314,7 @@ export function TurnsPanel({ graph, editable, act, header }) {
 }
 
 /** Problem, purpose, success criteria, and approval; the export references the canonical file. */
+/** `focusStep` is the focused step or lane, or null for the whole map. */
 export function BriefPanel({ focusStep, mapKey, api, act, header }) {
   const storageKey = `shape-map:discussion:${mapKey}:${focusStep?.id || 'all'}`;
   const [request, setRequest] = useState(() => {
@@ -319,7 +350,7 @@ export function BriefPanel({ focusStep, mapKey, api, act, header }) {
   return <>
     {header}
     <div className="fm-panel__body fm-brief" data-testid="fm-brief">
-      <p className="fm-muted">{focusStep ? '이 단계에 대한 요청을 정리해 AI에게 전해요.' : '마지막 턴 이후 바뀐 단계, 새 메모, 수정안만 담아 AI에게 전해요.'} 지도 전체를 옮겨 적지 않고 원본 파일을 가리켜요.</p>
+      <p className="fm-muted">{focusStep ? `이 ${focusStep.title !== undefined ? '줄' : '단계'}에 대한 요청을 정리해 AI에게 전해요.` : '마지막 턴 이후 바뀐 단계, 새 메모, 수정안만 담아 AI에게 전해요.'} 지도 전체를 옮겨 적지 않고 원본 파일을 가리켜요.</p>
       {[['problem', '지금 풀고 싶은 문제', '무엇이 불편하거나 막히나요?'], ['purpose', '목적', '무엇을 더 쉽게 하려는 건가요?'], ['successCriteria', '해결 성공 기준', '무엇을 확인하면 해결된 건가요?']].map(([field, label, placeholder]) => <label key={field} className="fm-field">
         <span className="fm-field__label">{label}{field === 'purpose' && <small>선택</small>}</span>
         <textarea rows={2} value={request[field]} maxLength={4000} placeholder={placeholder} onChange={(event) => update(field, event.target.value)} data-testid={`fm-brief-${field}`} /></label>)}
@@ -336,4 +367,50 @@ export function BriefPanel({ focusStep, mapKey, api, act, header }) {
       </>}
     </div>
   </>;
+}
+
+const COMPARE_OPTIONS = [
+  { id: 'previous', label: '이전 턴과 비교', hint: '기록한 두 턴 사이에 바뀐 단계가 파란색이에요' },
+  { id: 'current', label: '지금 지도와 비교', hint: '지금 지도와 다른 단계에 표시가 붙어요. 색은 바뀌지 않아요' },
+];
+
+/** The bar shown while reading a recorded turn, with the way back to the live map. */
+export function TurnBar({ turn, turns, reading, compare, onCompare, onView, onExit }) {
+  const index = turns.findIndex((item) => item.id === turn.id);
+  const changed = [...reading.states.values()].filter((state) => state.differs && !state.added).length;
+  const added = [...reading.states.values()].filter((state) => state.added).length;
+  const removed = reading.removed;
+  const names = (steps) => steps.slice(0, 3).map((step) => step.label).join(', ') + (steps.length > 3 ? ` 외 ${steps.length - 3}개` : '');
+  let summary;
+  if (!reading.base) summary = '첫 턴이라 비교할 이전 기록이 없어요. 색은 이 턴에 기록된 그대로예요.';
+  else if (compare === 'previous') {
+    summary = changed || added || removed.length
+      ? [changed && `바뀐 단계 ${changed}개`, added && `새 단계 ${added}개`, removed.length && `빠진 단계 ${removed.length}개(${names(removed)})`].filter(Boolean).join(' · ')
+      : '이전 턴과 달라진 단계가 없어요.';
+  } else {
+    summary = changed || added || removed.length
+      ? [changed && `지금과 다른 단계 ${changed}개`, added && `지금은 없는 단계 ${added}개`, removed.length && `그 뒤에 생긴 단계 ${removed.length}개(${names(removed)})`].filter(Boolean).join(' · ')
+      : '지금 지도와 같아요.';
+  }
+  return <div className="fm-turnbar" role="region" aria-label="기록한 턴 보기" data-testid="fm-turnbar">
+    <div className="fm-turnbar__main">
+      <FlowIcon name="history" size={15} />
+      <div className="fm-turnbar__text">
+        <strong>턴 {turn.number} · {turn.title}</strong>
+        <span>{new Date(turn.createdAt).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Seoul' })}에 기록한 모습이에요. 읽기만 할 수 있어요.</span>
+        <span className="fm-turnbar__summary" data-testid="fm-turn-summary">{summary}</span>
+      </div>
+    </div>
+    <div className="fm-turnbar__actions">
+      <div className="fm-segmented fm-segmented--compact" role="radiogroup" aria-label="무엇과 비교할까요">
+        {COMPARE_OPTIONS.map((option) => <button key={option.id} type="button" role="radio" aria-checked={compare === option.id} title={option.hint}
+          onClick={() => onCompare(option.id)} data-testid={`fm-compare-${option.id}`}>{option.label}</button>)}
+      </div>
+      <div className="fm-turnbar__nav">
+        <button type="button" className="fm-icon-button fm-icon-button--boxed" aria-label="이전 턴 보기" title="이전 턴" disabled={index <= 0} onClick={() => onView(turns[index - 1].id)}><FlowIcon name="left" size={14} /></button>
+        <button type="button" className="fm-icon-button fm-icon-button--boxed" aria-label="다음 턴 보기" title="다음 턴" disabled={index >= turns.length - 1} onClick={() => onView(turns[index + 1].id)}><FlowIcon name="right" size={14} /></button>
+      </div>
+      <button type="button" className="fm-button fm-button--dark" onClick={onExit} data-testid="fm-turn-exit"><FlowIcon name="back" size={13} />지금 지도로 돌아가기</button>
+    </div>
+  </div>;
 }

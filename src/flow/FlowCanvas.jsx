@@ -59,7 +59,7 @@ function BandLayer({ layout, emphasis }) {
   </div>;
 }
 
-function LaneRail({ layout, graph, words, tagsById, selectedLane, focusLane, emphasis, editable, onSelectLane, onFocusLane, onAddLane }) {
+function LaneRail({ layout, graph, words, tagsById, selectedLane, focusLane, emphasis, editable, laneStates, onSelectLane, onFocusLane, onAddLane }) {
   const { y, zoom } = useViewport();
   const railRef = useRef(null);
   const [railHeight, setRailHeight] = useState(800);
@@ -80,13 +80,16 @@ function LaneRail({ layout, graph, words, tagsById, selectedLane, focusLane, emp
       const key = band.laneId ?? SHARED_BAND_ID;
       const title = lane?.title ?? words.shared;
       const state = emphasis?.lanes && band.laneId ? emphasis.lanes.get(band.laneId) : null;
-      return <div key={band.id} className={`fm-rail__band${band.index % 2 ? ' is-odd' : ''}${compact ? ' is-compact' : ''}${height < 11 ? ' is-tiny' : ''}${selectedLane === key ? ' is-selected' : ''}${state ? ` is-${state}` : ''}`}
+      const memo = band.laneId ? laneStates?.get(band.laneId) : null;
+      return <div key={band.id} className={`fm-rail__band${band.index % 2 ? ' is-odd' : ''}${compact ? ' is-compact' : ''}${height < 11 ? ' is-tiny' : ''}${selectedLane === key ? ' is-selected' : ''}${state ? ` is-${state}` : ''}${memo?.status === 'concern' ? ' is-attention' : ''}`}
         style={{ top, height, '--fm-compact-size': `${Math.max(8, Math.min(11, height * .62))}px` }} data-testid={`fm-lane-${key}`}>
         <div className="fm-rail__inner" style={{ transform: `translateY(${inner}px)` }}>
           {lane ? <button type="button" className="fm-rail__title" title={lane.title} aria-pressed={selectedLane === key} onClick={() => onSelectLane(lane.id)}>{lane.title}</button>
             : <span className="fm-rail__title is-shared" title={words.sharedHint}>{title}</span>}
           {!compact && <span className="fm-rail__meta">
             {(lane?.tags || []).slice(0, 3).map((id) => tagsById.get(id) && <i key={id} title={tagsById.get(id).label} style={{ background: tagsById.get(id).stroke }} />)}
+            {memo?.unresolvedCount > 0 && <span className={`fm-rail__memo${memo.status === 'concern' ? ' is-concern' : ''}`} title={memo.status === 'concern' ? '풀리지 않은 걱정 메모가 있어요' : `풀리지 않은 메모 ${memo.unresolvedCount}개`}
+              data-testid={`fm-lane-memo-${band.laneId}`}><FlowIcon name="comment" size={10} />{memo.unresolvedCount}</span>}
             <span>단계 {band.stepCount}</span>
             <button type="button" className={`fm-rail__focus${focusLane === key ? ' is-on' : ''}`} aria-pressed={focusLane === key}
               aria-label={words.laneOnly(title)} title={words.laneFocus} onClick={() => onFocusLane(focusLane === key ? null : key)}>
@@ -114,7 +117,7 @@ function ZoomControls({ canvasRef, onFit, overview, onToggleOverview }) {
   </div>;
 }
 
-export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, stepStates, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane }) {
+export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, stepStates, laneStates, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane }) {
   const canvasRef = useRef(null);
   const flow = useReactFlow();
   const fitted = useRef(false);
@@ -213,7 +216,7 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
 
   return <div className={`fm-stage${showRail ? ' has-rail' : ''}`}>
     {showRail && <LaneRail layout={layout} graph={graph} words={words} tagsById={tagsById} selectedLane={selection?.kind === 'lane' ? selection.id : null} focusLane={focusLane}
-      emphasis={emphasis} editable={editable} onSelectLane={onSelectLane} onFocusLane={onFocusLane} onAddLane={onAddLane} />}
+      emphasis={emphasis} editable={editable} laneStates={laneStates} onSelectLane={onSelectLane} onFocusLane={onFocusLane} onAddLane={onAddLane} />}
     <div className={`fm-canvas${columns ? ' is-columns' : ''}`} ref={canvasRef} data-testid="fm-canvas">
       {showRail && <BandLayer layout={layout} emphasis={emphasis} />}
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}

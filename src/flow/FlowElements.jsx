@@ -31,9 +31,10 @@ function StepMarks({ step, state }) {
   const status = state?.status && state.status !== 'neutral' ? state.status : null;
   const memos = state?.unresolvedCount || 0;
   const links = step.features?.length || 0;
-  if (!status && !memos && !links) return null;
+  if (!status && !memos && !links && !state?.mark) return null;
   return <span className="fm-step__marks" aria-hidden="true">
     {status && <span className={`fm-mark fm-mark--${status}`}><i />{STATE_SHORT[status]}</span>}
+    {state?.mark && <span className="fm-mark fm-mark--compare">{state.mark}</span>}
     {memos > 0 && <span className="fm-mark" title={`풀리지 않은 메모 ${memos}개`}><FlowIcon name="comment" size={10} />{memos}</span>}
     {links > 0 && <span className="fm-mark" title={`연결된 기능 ${links}개`}><FlowIcon name="link" size={10} />{links}</span>}
   </span>;

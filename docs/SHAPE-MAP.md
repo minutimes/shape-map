@@ -148,6 +148,24 @@ npm run map -- propose search --reason "Names are too vague" --logic "Search nam
 npm run map -- turn "Search improvements" --summary "Explain the actual change and validation"
 ```
 
+They work on a project map through the running server with `--project KEY --map
+FILE` (or `SHAPE_MAP_PROJECT` and `SHAPE_MAP_MAP`), so an AI session can work on a
+user flow or system flow from the terminal. `FINAL_SHAPE_MAP_URL` selects the
+server (default `http://127.0.0.1:4317`). On a flow map, `comment` takes a step
+or lane ID, `propose` a step ID, and `brief --focus` a step or lane ID:
+
+```sh
+npm run map -- show --project bookshelf --map 02-lending.mmd
+npm run map -- comment reader_search "결과가 너무 많아요" --kind concern --project bookshelf --map 02-lending.mmd
+npm run map -- propose reader_wait --reason "알림이 늦어요" --logic "들어오면 바로 알려요" --success "한 시간 안에 알림" --project bookshelf --map 02-lending.mmd
+npm run map -- turn "알림 흐름 정리" --summary "실제로 바꾼 것과 확인한 방법" --project bookshelf --map 02-lending.mmd
+npm run map -- brief --focus reader_wait --problem "알림이 늦어요" --success "한 시간 안에 알림" --project bookshelf --map 02-lending.mmd
+```
+
+`brief` also accepts `--purpose` and `--approved` (which needs a problem and
+success criteria). There is no command for human review: only a person confirms
+it in the app.
+
 The server supplies turn IDs, comment IDs, dates, and review fingerprints. UI
 operations cannot inject those values. Source editing remains an explicit
 authoring channel; its declarations are descriptions, not verified runtime proof.
@@ -313,6 +331,25 @@ cannot be changed; blue appears only between two recorded turns. Memos, review,
 and proposals join the undo history like other edits; recording a turn starts a
 new history, because no earlier version holds that turn. The records are stored
 in the flow file (see [Flow collaboration](FORMAT.md#flow-collaboration)).
+
+A lane (참여자 or 영역) takes memos too, with the same kinds and the same
+논의 마침 / 다시 열기 flow, in its own 메모 tab. Lanes have no proposals, review,
+or links. A lane with an unresolved concern is yellow in the lane titles and is
+counted in the legend; new lane memos join the AI handoff, and a lane's
+**AI에 전달** focuses the request on that lane.
+
+**이 턴 보기** in the turns panel reads a recorded turn on the canvas. A bar names
+the turn and its time, says what changed, and keeps **지금 지도로 돌아가기**
+in view; Escape also returns. Reading a turn never restores it: the turn is
+read-only, editing and undo are hidden, and the live file is untouched. Red,
+yellow, and green show what that turn recorded. **이전 턴과 비교** (the default)
+makes blue the steps that differ from the previous recorded turn, lists the
+steps removed in that turn, and shows the changed name or description before
+and after in the step panel; the first turn has nothing to compare with and
+shows no blue. **지금 지도와 비교** marks the steps that differ from the live map
+with a neutral 지금과 다름 or 지금은 없음 mark and lists the steps added since,
+without blue, because the live map is not a recorded turn. The arrows step to
+the previous or next turn.
 
 A step can link to features of the project's 기능 계통도 maps, chosen from a list.
 Each link opens that feature in the 기능 계통도 tab, and a feature's editor lists

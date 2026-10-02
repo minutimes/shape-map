@@ -9,8 +9,8 @@ import {
 import { layoutFlow } from './flowLayout.js';
 import FlowCanvas, { viewportKey } from './FlowCanvas.jsx';
 import { ArrowPanel, LanePanel, MapPanel, PanelHeader, StepPanel, TagsPanel } from './FlowPanels.jsx';
-import { BriefPanel, StateLegend, TurnsPanel } from './FlowCollab.jsx';
-import { flowStepStates } from '../../lib/flowState.mjs';
+import { BriefPanel, StateLegend, TurnBar, TurnsPanel } from './FlowCollab.jsx';
+import { flowLaneStates, flowStepStates, flowTurnView } from '../../lib/flowState.mjs';
 import FlowSourcePanel from './FlowSourcePanel.jsx';
 import { TagChip } from './FlowElements.jsx';
 import FlowIcon from './FlowIcon.jsx';
@@ -28,8 +28,8 @@ function writePreference(key, value) {
   try { window.localStorage.setItem(key, value ? '1' : '0'); } catch { /* the toggle still works for this visit */ }
 }
 
-function SaveState({ pending, connection, invalid, editable, unsaved, onShowUnsaved }) {
-  const text = invalid ? '원문 확인 필요' : !editable ? '읽기 전용' : pending ? '저장 중…' : connection === 'online' ? '저장됨' : connection === 'offline' ? '연결 확인 중' : '여는 중';
+function SaveState({ pending, connection, invalid, editable, unsaved, onShowUnsaved, viewingTurn }) {
+  const text = viewingTurn ? '기록 보는 중' : invalid ? '원문 확인 필요' : !editable ? '읽기 전용' : pending ? '저장 중…' : connection === 'online' ? '저장됨' : connection === 'offline' ? '연결 확인 중' : '여는 중';
   const issue = invalid || connection === 'offline';
   return <>
     <span className={`fm-save${issue ? ' is-issue' : ''}${pending ? ' is-pending' : ''}`} role="status" data-testid="fm-save-state"><i aria-hidden="true" /><span>{text}</span></span>
@@ -64,6 +64,9 @@ function FlowStudio({ api, map }) {
   const [revealId, setRevealId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [stepTab, setStepTab] = useState('content');
+  const [laneTab, setLaneTab] = useState('content');
+  // Reading a recorded turn: { id, compare: 'previous' | 'current' }. It never changes the live map.
+  const [turnView, setTurnView] = useState(null);
   const [briefFocus, setBriefFocus] = useState(null);
   const [links, setLinks] = useState({ status: 'idle', data: null });
   const linksRequest = useRef(null);
@@ -126,11 +129,20 @@ function FlowStudio({ api, map }) {
   const kind = snapshot?.kind && snapshot.kind !== 'other' ? snapshot.kind : snapshot?.graph?.map?.kind || map?.kind;
   const words = flowVocabulary(kind);
   const kindRef = useRef(kind); kindRef.current = kind;
-  const graph = snapshot?.graph || null;
+  const liveGraph = snapshot?.graph || null;
+  const turns = liveGraph?.turns || [];
+  const viewedTurn = turnView ? turns.find((turn) => turn.id === turnView.id) || null : null;
+  const turnReading = useMemo(() => {
+    if (!viewedTurn) return null;
+    const index = turns.indexOf(viewedTurn);
+    return flowTurnView(viewedTurn, { previous: turns[index - 1] || null, live: liveGraph, compare: turnView.compare, map: liveGraph.map, direction: liveGraph.direction });
+  }, [viewedTurn, turns, liveGraph, turnView?.compare]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While a turn is read, the canvas and panels show that turn; edits always go to the live map.
+  const graph = turnReading ? turnReading.graph : liveGraph;
   const safeGraph = graph || EMPTY_GRAPH;
   const invalid = snapshot && snapshot.sourceStatus?.valid === false ? snapshot.sourceStatus : null;
   // The map's own live snapshot decides; the project list can lag behind it.
-  const editable = Boolean(snapshot && graph && snapshot.editable !== false && !invalid);
+  const editable = Boolean(snapshot && liveGraph && snapshot.editable !== false && !invalid && !viewedTurn);
   const editableRef = useRef(editable); editableRef.current = editable;
 
   const notify = useCallback((text, error = false) => setToast({ text, error }), []);
@@ -190,7 +202,7 @@ function FlowStudio({ api, map }) {
     if (!exists) { setSelection(null); if (panel === 'inspect') setPanel(null); }
   }, [graph, selection, panel]);
   useEffect(() => {
-    if (graph && panel === 'brief' && briefFocus && !graph.steps.some((step) => step.id === briefFocus)) setPanel(null);
+    if (graph && panel === 'brief' && briefFocus && ![...graph.steps, ...graph.lanes].some((item) => item.id === briefFocus)) setPanel(null);
   }, [graph, panel, briefFocus]);
   useEffect(() => {
     if (!graph) return;
@@ -225,6 +237,7 @@ function FlowStudio({ api, map }) {
     openTags: () => setPanel('tags'),
     clearHistory: () => updateHistory({ undo: [], redo: [] }),
     openBrief: (stepId = null) => { setBriefFocus(stepId); if (!stepId) setSelection(null); setPanel('brief'); },
+    viewTurn: (id) => { setTurnView((current) => ({ id, compare: current?.compare || 'previous' })); setPanel((current) => (current === 'turns' ? current : null)); },
     openFeature: (file, id) => map?.onOpenFeature?.(file, id),
     loadLinks,
     focusLane: (laneId) => setFocusLane(laneId),
@@ -265,7 +278,7 @@ function FlowStudio({ api, map }) {
       const mod = event.metaKey || event.ctrlKey;
       const key = event.key.toLowerCase();
       if (mod && (key === 'z' || key === 'y')) {
-        if (isTextTarget(event.target)) return;
+        if (isTextTarget(event.target) || turnView) return;
         event.preventDefault();
         if (key === 'y' || event.shiftKey) travel('redo'); else travel('undo');
         return;
@@ -273,7 +286,8 @@ function FlowStudio({ api, map }) {
       if (event.key === 'Escape') {
         if (panel) { event.preventDefault(); setPanel(null); if (panel === 'inspect') setSelection(null); return; }
         if (selection) { setSelection(null); return; }
-        if (highlightTag || focusLane) { setHighlightTag(null); setFocusLane(null); }
+        if (highlightTag || focusLane) { setHighlightTag(null); setFocusLane(null); return; }
+        if (turnView) setTurnView(null);
         return;
       }
       if ((event.key === 'Delete' || event.key === 'Backspace') && !isTextTarget(event.target) && editableRef.current && selection) {
@@ -287,10 +301,11 @@ function FlowStudio({ api, map }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [travel, panel, selection, highlightTag, focusLane, act]);
+  }, [travel, panel, selection, highlightTag, focusLane, act, turnView]);
 
   const layout = useMemo(() => (graph ? layoutFlow(graph, { notes }) : null), [graph, notes]);
-  const stepStates = useMemo(() => flowStepStates(graph), [graph]);
+  const stepStates = useMemo(() => turnReading?.states || flowStepStates(graph), [graph, turnReading]);
+  const laneStates = useMemo(() => turnReading?.laneStates || flowLaneStates(graph), [graph, turnReading]);
   useEffect(() => {
     const id = initialStep.current;
     if (!id || !graph) return;
@@ -325,7 +340,9 @@ function FlowStudio({ api, map }) {
   const hasNotes = safeGraph.steps.some((step) => step.summary);
   const invalidReason = invalid ? readOnlyReason({ sourceStatus: invalid, kind }) : null;
 
-  return <div className={`fm-workspace${panel ? ' has-panel' : ''}`} ref={rootRef} data-testid="fm-workspace" data-kind={kind}>
+  const briefTarget = briefFocus ? safeGraph.steps.find((step) => step.id === briefFocus) || safeGraph.lanes.find((lane) => lane.id === briefFocus) || null : null;
+
+  return <div className={`fm-workspace${panel ? ' has-panel' : ''}${viewedTurn ? ' is-reading-turn' : ''}`} ref={rootRef} data-testid="fm-workspace" data-kind={kind}>
     <header className="fm-header">
       <div className="fm-header__title">
         <span className="fm-kind">{words.kindLabel}</span>
@@ -333,16 +350,16 @@ function FlowStudio({ api, map }) {
         {graph && <button type="button" className="fm-icon-button" aria-label="지도 이름과 설명 보기" title="지도 정보" onClick={() => { setSelection(null); setPanel('map'); }}><FlowIcon name={editable ? 'pencil' : 'info'} size={14} /></button>}
       </div>
       <div className="fm-header__actions">
-        <SaveState pending={pending} connection={connection} invalid={Boolean(invalid)} editable={editable} unsaved={drafts.failed().length} onShowUnsaved={showUnsaved} />
+        <SaveState pending={pending} connection={connection} invalid={Boolean(invalid)} editable={editable} unsaved={drafts.failed().length} onShowUnsaved={showUnsaved} viewingTurn={Boolean(viewedTurn)} />
         {editable && <>
           <button type="button" className="fm-icon-button" aria-label="되돌리기" title="되돌리기 (⌘Z)" disabled={!history.undo.length} onClick={() => travel('undo')} data-testid="fm-undo"><FlowIcon name="undo" size={15} /></button>
           <button type="button" className="fm-icon-button" aria-label="다시 하기" title="다시 하기 (⇧⌘Z)" disabled={!history.redo.length} onClick={() => travel('redo')} data-testid="fm-redo"><FlowIcon name="redo" size={15} /></button>
         </>}
         {graph && <button type="button" className={`fm-button fm-button--small${panel === 'turns' ? ' is-on' : ''}`} aria-pressed={panel === 'turns'} onClick={() => setPanel(panel === 'turns' ? null : 'turns')}
-          title="지금 모습을 턴으로 기록하고 지난 턴을 봐요" data-testid="fm-open-turns"><FlowIcon name="history" size={13} /><span>턴{safeGraph.turns?.length ? ` ${safeGraph.turns.length}` : ''}</span></button>}
+          title="지금 모습을 턴으로 기록하고 지난 턴을 봐요" data-testid="fm-open-turns"><FlowIcon name="history" size={13} /><span>턴{turns.length ? ` ${turns.length}` : ''}</span></button>}
         <button type="button" className={`fm-button fm-button--small${notes ? ' is-on' : ''}`} aria-pressed={notes} disabled={!hasNotes} title={hasNotes ? '카드에 설명 첫 줄 보이기' : '설명이 있는 단계가 없어요'} onClick={toggleNotes}><FlowIcon name="comment" size={13} /><span>설명 보기</span></button>
         <button type="button" className={`fm-button fm-button--small${panel === 'source' ? ' is-on' : ''}`} aria-pressed={panel === 'source'} onClick={() => setPanel(panel === 'source' ? null : 'source')} data-testid="fm-open-source"><FlowIcon name="code" size={13} /><span>원문</span></button>
-        {graph && api.requestBrief && <button type="button" className="fm-button fm-button--small fm-button--dark" onClick={() => act.openBrief(null)} data-testid="fm-open-brief"><FlowIcon name="mail" size={13} /><span>AI와 논의</span></button>}
+        {graph && api.requestBrief && !viewedTurn && <button type="button" className="fm-button fm-button--small fm-button--dark" onClick={() => act.openBrief(null)} data-testid="fm-open-brief"><FlowIcon name="mail" size={13} /><span>AI와 논의</span></button>}
       </div>
     </header>
     {graph && <div className="fm-toolbar" role="toolbar" aria-label="보기">
@@ -353,7 +370,7 @@ function FlowStudio({ api, map }) {
         <button type="button" className="fm-text-button" onClick={() => { setSelection(null); setPanel('tags'); }}>{safeGraph.tags.length ? '관리' : '표시 만들기'}</button>
       </div>
       <div className="fm-toolbar__side">
-        <StateLegend states={stepStates} />
+        <StateLegend states={stepStates} laneStates={laneStates} />
         <ArrowLegend />
         {safeGraph.lanes.length > 0 && <label className="fm-select fm-select--small"><span className="fm-sr-only">{words.laneFocus}</span>
           <select value={focusLane ?? ''} onChange={(event) => setFocusLane(event.target.value || null)} data-testid="fm-focus-lane">
@@ -368,13 +385,15 @@ function FlowStudio({ api, map }) {
         <ProblemDetail detail={invalidReason.detail} /></div>
       <button type="button" className="fm-button fm-button--small" onClick={() => setPanel('source')}>원문 보기</button></div>}
     {!invalid && snapshot.editable === false && <div className="fm-banner is-quiet" role="status"><FlowIcon name="info" size={15} /><div>이 지도는 읽기만 할 수 있어요.</div></div>}
+    {viewedTurn && <TurnBar turn={viewedTurn} turns={turns} reading={turnReading} compare={turnView.compare}
+      onCompare={(compare) => setTurnView((current) => ({ ...current, compare }))} onView={act.viewTurn} onExit={() => { setTurnView(null); setSelection(null); setPanel(null); }} />}
     {(highlightTag || focusLane) && <div className="fm-filter-note" role="status">
       {highlightTag && <span>{safeGraph.tags.find((tag) => tag.id === highlightTag)?.label} 표시만 밝게 보는 중</span>}
       {focusLane && <span>{words.laneOnly(focusLane === SHARED_BAND_ID ? words.shared : safeGraph.lanes.find((lane) => lane.id === focusLane)?.title ?? '')} 중</span>}
       <button type="button" className="fm-text-button" onClick={() => { setHighlightTag(null); setFocusLane(null); }}>모두 보기</button>
     </div>}
     <div className="fm-body">
-      {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} storageKey={viewportKey(map)} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId} stepStates={stepStates}
+      {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} storageKey={viewportKey(map)} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId} stepStates={stepStates} laneStates={laneStates}
         onSelect={canvasSelect} onConnect={onConnect} onAddNext={onAddNext} onInsert={onInsert} onAddInLane={onAddInLane} onSelectLane={onSelectLane}
         onFocusLane={setFocusLane} onAddLane={act.addLane} /> : <div className="fm-empty"><p>그림을 그릴 수 없어요. 원문을 확인해 주세요.</p></div>}
       {graph && !safeGraph.steps.length && !safeGraph.lanes.length && <div className="fm-start">
@@ -384,14 +403,16 @@ function FlowStudio({ api, map }) {
       </div>}
       {panel && <aside className={`fm-panel${panel === 'source' ? ' fm-panel--wide' : panel === 'brief' ? ' fm-panel--brief' : ''}`} aria-label="자세히 보기" data-testid="fm-panel">
         {panel === 'inspect' && selectedStep && <StepPanel step={selectedStep} graph={safeGraph} words={words} editable={editable} act={act} focusLabel={focusLabel === selectedStep.id}
-          state={stepStates.get(selectedStep.id)} links={links} tab={stepTab} onTab={setStepTab} />}
-        {panel === 'turns' && <TurnsPanel graph={safeGraph} editable={editable} act={act} header={<PanelHeader eyebrow={words.kindLabel} title="턴 기록" onClose={() => setPanel(null)} />} />}
-        {panel === 'brief' && <BriefPanel key={briefFocus || 'all'} focusStep={briefFocus ? safeGraph.steps.find((step) => step.id === briefFocus) : null}
+          state={stepStates.get(selectedStep.id)} links={links} tab={stepTab} onTab={setStepTab} turn={viewedTurn} />}
+        {panel === 'turns' && <TurnsPanel graph={liveGraph || EMPTY_GRAPH} editable={editable} act={act} viewing={viewedTurn?.id ?? null}
+          header={<PanelHeader eyebrow={words.kindLabel} title="턴 기록" onClose={() => setPanel(null)} />} />}
+        {panel === 'brief' && <BriefPanel key={briefFocus || 'all'} focusStep={briefTarget}
           mapKey={`project:${map?.project ?? ''}:${snapshot.mapPath}`} api={api} act={act}
-          header={<PanelHeader eyebrow={briefFocus ? 'AI에 전달 · 단계' : 'AI와 논의'} title={briefFocus ? safeGraph.steps.find((step) => step.id === briefFocus)?.label ?? '' : title}
+          header={<PanelHeader eyebrow={briefFocus ? `AI에 전달 · ${briefTarget?.title !== undefined ? words.lane : '단계'}` : 'AI와 논의'} title={briefFocus ? briefTarget?.label ?? briefTarget?.title ?? '' : title}
             onClose={() => setPanel(briefFocus ? 'inspect' : null)} />} />}
         {panel === 'inspect' && selectedArrow && <ArrowPanel arrow={selectedArrow} graph={safeGraph} editable={editable} act={act} />}
-        {panel === 'inspect' && selectedLane && <LanePanel lane={selectedLane} graph={safeGraph} words={words} editable={editable} act={act} focusLane={focusLane} focusLabel={focusLabel === selectedLane.id} />}
+        {panel === 'inspect' && selectedLane && <LanePanel lane={selectedLane} graph={safeGraph} words={words} editable={editable} act={act} focusLane={focusLane} focusLabel={focusLabel === selectedLane.id}
+          state={laneStates.get(selectedLane.id)} tab={laneTab} onTab={setLaneTab} turn={viewedTurn} />}
         {panel === 'map' && <MapPanel graph={safeGraph} fallbackTitle={fallbackTitle} words={words} editable={editable} act={act} />}
         {panel === 'tags' && <TagsPanel graph={safeGraph} editable={editable} act={act} highlight={highlightTag} onHighlight={setHighlightTag} />}
         {panel === 'source' && <FlowSourcePanel source={snapshot.source} editable={editable} invalid={invalid} invalidReason={invalidReason}

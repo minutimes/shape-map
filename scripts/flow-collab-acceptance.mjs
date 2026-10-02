@@ -183,6 +183,55 @@ async function fullLoop(page, project) {
   await page.getByTestId('fm-step-owner_list').waitFor();
   await screenshot(page, 'colors-1440');
 
+  // Reading a recorded turn: read-only, compared honestly, with an obvious way back.
+  const liveBefore = await readFlow(project);
+  await page.getByTestId('fm-open-turns').click();
+  await page.getByTestId('fm-view-turn-2').click();
+  const bar = page.getByTestId('fm-turnbar');
+  await bar.waitFor();
+  check('a turn opens read-only with its title', (await bar.textContent()).includes('턴 2 · 요청 확인 다듬기') && (await page.getByTestId('fm-undo').count()) === 0 && (await page.getByTestId('fm-open-brief').count()) === 0);
+  check('blue in a turn is the difference from the previous recorded turn', (await stateOf(page, 'owner_list')) === 'changed' && (await stateOf(page, 'reader_search')) === 'concern');
+  check('the turn bar says what changed', (await page.getByTestId('fm-turn-summary').textContent()).includes('바뀐 단계 1개'), await page.getByTestId('fm-turn-summary').textContent());
+  // The readable starting view is kept: open the card where it is.
+  await page.getByTestId('fm-step-owner_list').click();
+  await page.getByTestId('fm-turn-diff').waitFor();
+  check('a step in a turn is read-only', await page.getByTestId('fm-step-label').isDisabled() && (await page.getByTestId('fm-review').count()) === 0 && (await page.getByTestId('fm-step-brief').count()) === 0);
+  check('the step shows its recorded change', (await page.getByTestId('fm-turn-diff').textContent()).includes('책 올리기') && (await page.getByTestId('fm-turn-diff').textContent()).includes('내 책 올리기'));
+  await screenshot(page, 'turn-view-1440');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('fm-open-turns').click();
+  await page.getByTestId('fm-view-turn-1').click();
+  await until(async () => (await bar.textContent()).includes('턴 1 · 처음 모습'));
+  check('the first turn does not invent earlier changes', (await page.locator('[data-state="changed"]').count()) === 0 && (await page.getByTestId('fm-turn-summary').textContent()).includes('첫 턴'));
+  check('the first turn shows the map as recorded', (await page.getByTestId('fm-step-owner_list').textContent()).includes('책 올리기') && !(await page.getByTestId('fm-step-owner_list').textContent()).includes('내 책'));
+  await page.getByTestId('fm-compare-current').click();
+  await until(async () => (await page.getByTestId('fm-step-owner_list').locator('.fm-mark--compare').count()) === 1, { message: 'no comparison mark' });
+  check('comparing with the live map marks differences without turning them blue', (await page.locator('[data-state="changed"]').count()) === 0
+    && (await page.getByTestId('fm-step-owner_list').locator('.fm-mark--compare').textContent()) === '지금과 다름');
+  await screenshot(page, 'turn-compare-current-1440');
+  check('reading turns never changes the live file', (await readFlow(project)) === liveBefore);
+  await page.getByTestId('fm-turn-exit').click();
+  await until(async () => (await page.getByTestId('fm-turnbar').count()) === 0);
+  check('the way back returns to the editable live map', (await page.getByTestId('fm-undo').count()) === 1 && (await page.getByTestId('fm-step-owner_list').textContent()).includes('내 책 올리기'));
+
+  // Memos on a lane: the same kinds and resolve flow; an open concern is yellow.
+  await page.getByTestId('fm-lane-owner').locator('.fm-rail__title').click();
+  await page.getByTestId('fm-lane-tab-comments').click();
+  await page.getByTestId('fm-memo-input').fill('책 주인의 답이 너무 늦어요');
+  await page.getByRole('radio', { name: '걱정되는 점' }).click();
+  await page.getByTestId('fm-memo-submit').click();
+  await until(async () => (await page.getByTestId('fm-lane-owner').getAttribute('class')).includes('is-attention'), { message: 'lane memo mark missing' });
+  check('a lane concern shows on the lane and in the legend', (await page.getByTestId('fm-lane-status').textContent()).includes('검토 필요')
+    && (await page.getByTestId('fm-state-legend').textContent()).includes('검토 필요2'));
+  check('the lane memo is written to the flow file', /%% sm-block: owner\|\{"comments":\[\{[^\n]*책 주인의 답이 너무 늦어요/.test(await readFlow(project)));
+  await screenshot(page, 'lane-memo-1440');
+  await page.getByTestId('fm-comments').getByRole('button', { name: '논의 마침' }).click();
+  await until(async () => !(await page.getByTestId('fm-lane-owner').getAttribute('class')).includes('is-attention'), { message: 'resolved lane memo still marked' });
+  check('resolving the lane memo clears the yellow', (await page.getByTestId('fm-lane-status').textContent()).includes('걱정이 없어요'));
+  await page.getByTestId('fm-comments').getByRole('button', { name: '다시 열기' }).click();
+  await until(async () => (await page.getByTestId('fm-lane-owner').getAttribute('class')).includes('is-attention'));
+  await page.keyboard.press('Escape');
+
   // The AI handoff: problem, purpose, success criteria, and approval.
   await page.getByTestId('fm-open-brief').click();
   const brief = page.getByTestId('fm-brief');
@@ -232,9 +281,24 @@ async function lightPass(page, width) {
   await until(async () => (await page.getByTestId('fm-feature-links').textContent()).includes('찾을 수 없는 기능'));
   await screenshot(page, `features-${width}`);
   await page.keyboard.press('Escape');
+  // Reopen at the readable starting view, where lane titles show in full.
+  await page.evaluate(() => window.localStorage.removeItem('shape-map:flow-viewport:sample/02-lending.mmd'));
+  await page.reload();
+  await page.getByTestId('fm-lane-owner').locator('.fm-rail__title').click();
+  await page.getByTestId('fm-lane-tab-comments').click();
+  check(`${width}: the lane memo tab lists the lane memo`, (await page.getByTestId('fm-comments').textContent()).includes('책 주인의 답이'));
+  await screenshot(page, `lane-memo-${width}`);
+  await page.keyboard.press('Escape');
   await page.getByTestId('fm-open-turns').click();
   await page.getByTestId('fm-turn-list').waitFor();
   await screenshot(page, `turns-${width}`);
+  await page.getByTestId('fm-view-turn-2').click();
+  await page.getByTestId('fm-turnbar').waitFor();
+  check(`${width}: the way back is visible while reading a turn`, await page.getByTestId('fm-turn-exit').isVisible());
+  check(`${width}: no horizontal page scroll while reading a turn`, (await noOverflow(page)) <= 0);
+  await screenshot(page, `turn-view-${width}`);
+  await page.getByTestId('fm-turn-exit').click();
+  await until(async () => (await page.getByTestId('fm-turnbar').count()) === 0);
   await page.getByTestId('fm-open-brief').click();
   await page.getByTestId('fm-brief-text').waitFor();
   const briefBox = await page.getByTestId('fm-panel').boundingBox();
