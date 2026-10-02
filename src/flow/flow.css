@@ -308,7 +308,8 @@ button.fm-rail__title:hover { text-decoration: underline; text-underline-offset:
   .fm-rail__title { font-size: 11.5px; }
   .fm-rail__meta > span { display: none; }
   .fm-rail__focus { opacity: 1; margin-left: 0; }
-  .fm-rail__add { left: 6px; right: 6px; font-size: 10.5px; padding: 0 4px; }
+  .fm-rail__add { left: 6px; right: 6px; }
+  .fm-rail__add > span { display: none; }
   .fm-panel, .fm-panel--wide { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 64%; border-radius: 14px; }
   .fm-panel--wide { top: 8px; max-height: none; }
   .has-panel .fm-zoom { display: none; }

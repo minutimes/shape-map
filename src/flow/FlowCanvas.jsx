@@ -11,6 +11,7 @@ const edgeTypes = { flow: FlowArrow };
 export const MIN_ZOOM = .08;
 export const MAX_ZOOM = 2;
 const FIT_PADDING = 28;
+const READABLE_ZOOM = .6;
 
 /** Fits the whole map, never above 100%, from the top and centered across. */
 export function fitViewport(bounds, width, height) {
@@ -19,6 +20,33 @@ export function fitViewport(bounds, width, height) {
   const x = Math.max(FIT_PADDING, (width - bounds.width * zoom) / 2) - bounds.x * zoom;
   const y = FIT_PADDING - bounds.y * zoom;
   return { x: Math.round(x), y: Math.round(y), zoom };
+}
+
+/**
+ * The first view of a map. A phone-width canvas cannot show a long flow at a
+ * readable size, so it opens at the start of the flow instead of shrinking it.
+ */
+export function openingViewport(bounds, width, height) {
+  const fitted = fitViewport(bounds, width, height);
+  if (width >= 640 || fitted.zoom >= READABLE_ZOOM) return fitted;
+  const zoom = READABLE_ZOOM;
+  const x = bounds.width * zoom <= width - FIT_PADDING * 2 ? (width - bounds.width * zoom) / 2 : FIT_PADDING;
+  return { x: Math.round(x - bounds.x * zoom), y: Math.round(FIT_PADDING - bounds.y * zoom), zoom };
+}
+
+export function viewportKey(map) {
+  return `shape-map:flow-viewport:${map?.project ?? ''}/${map?.file ?? ''}`;
+}
+
+function readViewport(key) {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key) || 'null');
+    return value && [value.x, value.y, value.zoom].every(Number.isFinite) && value.zoom >= MIN_ZOOM && value.zoom <= MAX_ZOOM ? value : null;
+  } catch { return null; }
+}
+
+function writeViewport(key, viewport) {
+  try { window.localStorage.setItem(key, JSON.stringify({ x: Math.round(viewport.x), y: Math.round(viewport.y), zoom: Math.round(viewport.zoom * 1000) / 1000 })); } catch { /* the view still works without storage */ }
 }
 
 function BandLayer({ layout, emphasis }) {
@@ -66,7 +94,7 @@ function LaneRail({ layout, graph, words, tagsById, selectedLane, focusLane, emp
         </div>
       </div>;
     })}
-    {editable && <button type="button" className="fm-rail__add" onClick={onAddLane}><FlowIcon name="plus" size={13} />{words.laneAdd}</button>}
+    {editable && <button type="button" className="fm-rail__add" onClick={onAddLane} aria-label={words.laneAdd}><FlowIcon name="plus" size={13} /><span>{words.laneAdd}</span></button>}
   </nav>;
 }
 
@@ -81,7 +109,7 @@ function ZoomControls({ canvasRef, onFit }) {
   </div>;
 }
 
-export default function FlowCanvas({ graph, layout, words, emphasis, selection, focusLane, editable, revealId, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane }) {
+export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane }) {
   const canvasRef = useRef(null);
   const flow = useReactFlow();
   const fitted = useRef(false);
@@ -126,21 +154,30 @@ export default function FlowCanvas({ graph, layout, words, emphasis, selection, 
 
   useEffect(() => {
     if (fitted.current) return undefined;
-    const frame = requestAnimationFrame(() => { fit(0); fitted.current = true; });
+    const frame = requestAnimationFrame(() => {
+      const element = canvasRef.current; if (!element) return;
+      const { width, height } = element.getBoundingClientRect();
+      flow.setViewport(readViewport(storageKey) || openingViewport(layout.bounds, width, height), { duration: 0 });
+      fitted.current = true;
+    });
     return () => cancelAnimationFrame(frame);
-  }, [fit]);
+  }, [flow, layout.bounds, storageKey]);
 
-  // Keep a newly added or chosen step in view without changing the zoom.
+  // Keep a newly added or chosen step in view, clear of the editing panel, without changing the zoom.
   useEffect(() => {
     if (!revealId?.id || !fitted.current) return;
     const card = layout.cards.find((item) => item.id === revealId.id);
     const element = canvasRef.current;
     if (!card || !element) return;
-    const { width, height } = element.getBoundingClientRect();
+    const area = element.getBoundingClientRect();
+    let right = area.width; let bottom = area.height;
+    const panel = element.closest('.fm-workspace')?.querySelector('.fm-panel')?.getBoundingClientRect();
+    if (panel && panel.left > area.left + area.width / 2) right = Math.max(area.width / 3, panel.left - area.left - 8);
+    else if (panel && panel.top > area.top + 40) bottom = Math.max(area.height / 4, panel.top - area.top - 8);
     const { x, y, zoom } = flow.getViewport();
     const left = card.x * zoom + x; const top = card.y * zoom + y;
-    if (left >= 16 && top >= 16 && left + card.width * zoom <= width - 16 && top + card.height * zoom <= height - 16) return;
-    flow.setCenter(card.x + card.width / 2, card.y + card.height / 2, { zoom, duration: 220 });
+    if (left >= 16 && top >= 16 && left + card.width * zoom <= right - 16 && top + card.height * zoom <= bottom - 16) return;
+    flow.setViewport({ x: right / 2 - (card.x + card.width / 2) * zoom, y: bottom / 2 - (card.y + card.height / 2) * zoom, zoom }, { duration: 220 });
   }, [revealId, layout, flow]);
 
   const onNodesChange = useCallback((changes) => {
@@ -163,7 +200,7 @@ export default function FlowCanvas({ graph, layout, words, emphasis, selection, 
     <div className={`fm-canvas${columns ? ' is-columns' : ''}`} ref={canvasRef} data-testid="fm-canvas">
       {showRail && <BandLayer layout={layout} emphasis={emphasis} />}
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-        onPaneClick={() => onSelect(null)} onConnect={handleConnect} onConnectEnd={handleConnectEnd}
+        onPaneClick={() => onSelect(null)} onMoveEnd={(_event, viewport) => { if (fitted.current) writeViewport(storageKey, viewport); }} onConnect={handleConnect} onConnectEnd={handleConnectEnd}
         nodesDraggable={false} nodesConnectable={editable} elementsSelectable nodesFocusable edgesFocusable
         minZoom={MIN_ZOOM} maxZoom={MAX_ZOOM} panOnScroll zoomOnScroll={false} zoomOnPinch={false} zoomOnDoubleClick={false} zoomActivationKeyCode={null}
         panOnDrag selectionOnDrag={false} selectionKeyCode={null} multiSelectionKeyCode={null} deleteKeyCode={null}

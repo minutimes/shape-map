@@ -7,7 +7,7 @@ import {
   arrowKey, connectOperation, describeError, emphasisFor, insertOnArrowOperation, laneStepOperation, newIdAfter, nextStepOperation, pushHistory,
 } from './flowEditing.js';
 import { layoutFlow } from './flowLayout.js';
-import FlowCanvas from './FlowCanvas.jsx';
+import FlowCanvas, { viewportKey } from './FlowCanvas.jsx';
 import { ArrowPanel, LanePanel, MapPanel, StepPanel, TagsPanel } from './FlowPanels.jsx';
 import FlowSourcePanel from './FlowSourcePanel.jsx';
 import { TagChip } from './FlowElements.jsx';
@@ -315,7 +315,7 @@ function FlowStudio({ api, map }) {
       <button type="button" className="fm-text-button" onClick={() => { setHighlightTag(null); setFocusLane(null); }}>모두 보기</button>
     </div>}
     <div className="fm-body">
-      {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId}
+      {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} storageKey={viewportKey(map)} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId}
         onSelect={canvasSelect} onConnect={onConnect} onAddNext={onAddNext} onInsert={onInsert} onAddInLane={onAddInLane} onSelectLane={onSelectLane}
         onFocusLane={setFocusLane} onAddLane={act.addLane} /> : <div className="fm-empty"><p>그림을 그릴 수 없어요. 원문을 확인해 주세요.</p></div>}
       {graph && !safeGraph.steps.length && !safeGraph.lanes.length && <div className="fm-start">
