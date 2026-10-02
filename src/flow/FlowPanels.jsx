@@ -7,6 +7,7 @@ import {
 import { DraftField, PanelSection, Segmented } from './FlowFields.jsx';
 import { TagChip } from './FlowElements.jsx';
 import FlowIcon from './FlowIcon.jsx';
+import { draftKey } from './flowDrafts.js';
 
 function PanelHeader({ eyebrow, title, onClose }) {
   return <header className="fm-panel__header">
@@ -50,9 +51,9 @@ export function StepPanel({ step, graph, words, editable, act, focusLabel }) {
   return <>
     <PanelHeader eyebrow={`단계 · ${laneTitle(graph, step.lane, words.shared)}`} title={step.label} onClose={act.close} />
     <div className="fm-panel__body">
-      <DraftField key={`${step.id}-label`} label="이름" value={step.label} limit={TEXT_LIMITS.step} disabled={!editable} autoFocus={focusLabel} testId="fm-step-label"
+      <DraftField key={`${step.id}-label`} store={act.drafts} draftKey={draftKey('step', step.id, 'label')} label="이름" value={step.label} limit={TEXT_LIMITS.step} disabled={!editable} autoFocus={focusLabel} testId="fm-step-label"
         clean={(text) => cleanLabel(text)} onCommit={(label) => act.send({ type: 'updateStep', id: step.id, label }, '단계 이름 바꾸기')} />
-      <DraftField key={`${step.id}-summary`} label="설명" hint="카드에는 첫 줄만 보여요" value={step.summary || ''} multiline limit={TEXT_LIMITS.summary} allowEmpty disabled={!editable}
+      <DraftField key={`${step.id}-summary`} store={act.drafts} draftKey={draftKey('step', step.id, 'summary')} label="설명" hint="카드에는 첫 줄만 보여요" value={step.summary || ''} multiline limit={TEXT_LIMITS.summary} allowEmpty disabled={!editable}
         placeholder="이 단계에서 일어나는 일, 정해야 할 것" clean={cleanSummary} testId="fm-step-summary"
         onCommit={(summary) => act.send({ type: 'updateStep', id: step.id, summary: summary || null }, '단계 설명 바꾸기')} />
       <Segmented label="모양" options={STEP_SHAPES} value={step.shape} disabled={!editable}
@@ -121,7 +122,7 @@ export function ArrowPanel({ arrow, graph, editable, act }) {
       <Segmented label="종류" options={ARROW_STYLES} value={arrow.style} disabled={!editable}
         renderOption={(option) => <>{ARROW_SAMPLE(option.id)}{option.label}</>}
         onChange={(style) => act.send({ type: 'updateArrow', source: arrow.source, target: arrow.target, style }, '화살표 종류 바꾸기')} />
-      <DraftField key={`${arrow.source}->${arrow.target}`} label="글자" hint="비우면 글자가 없어져요" value={arrow.label || ''} limit={TEXT_LIMITS.arrow} allowEmpty disabled={!editable}
+      <DraftField key={`${arrow.source}->${arrow.target}`} store={act.drafts} draftKey={draftKey('arrow', `${arrow.source}->${arrow.target}`, 'label')} label="글자" hint="비우면 글자가 없어져요" value={arrow.label || ''} limit={TEXT_LIMITS.arrow} allowEmpty disabled={!editable}
         placeholder="예: 보증금, 거절, 실패하면" clean={(text) => cleanLabel(text, TEXT_LIMITS.arrow)} testId="fm-arrow-label-input"
         onCommit={(label) => act.send({ type: 'updateArrow', source: arrow.source, target: arrow.target, label: label || null }, '화살표 글자 바꾸기')} />
       {editable && <div className="fm-panel__actions fm-panel__actions--stack">
@@ -144,9 +145,9 @@ export function LanePanel({ lane, graph, words, editable, act, focusLane, focusL
   return <>
     <PanelHeader eyebrow={words.lane} title={lane.title} onClose={act.close} />
     <div className="fm-panel__body">
-      <DraftField key={`${lane.id}-title`} label="이름" value={lane.title} limit={TEXT_LIMITS.lane} disabled={!editable} autoFocus={focusLabel} testId="fm-lane-title"
+      <DraftField key={`${lane.id}-title`} store={act.drafts} draftKey={draftKey('lane', lane.id, 'title')} label="이름" value={lane.title} limit={TEXT_LIMITS.lane} disabled={!editable} autoFocus={focusLabel} testId="fm-lane-title"
         clean={(text) => cleanLabel(text, TEXT_LIMITS.lane)} onCommit={(title) => act.send({ type: 'updateLane', id: lane.id, title }, `${words.lane} 이름 바꾸기`)} />
-      <DraftField key={`${lane.id}-summary`} label="설명" value={lane.summary || ''} multiline allowEmpty limit={TEXT_LIMITS.summary} disabled={!editable}
+      <DraftField key={`${lane.id}-summary`} store={act.drafts} draftKey={draftKey('lane', lane.id, 'summary')} label="설명" value={lane.summary || ''} multiline allowEmpty limit={TEXT_LIMITS.summary} disabled={!editable}
         placeholder={words.lanePlaceholder} clean={cleanSummary}
         onCommit={(summary) => act.send({ type: 'updateLane', id: lane.id, summary: summary || null }, `${words.lane} 설명 바꾸기`)} />
       <TagPicker graph={graph} value={lane.tags} disabled={!editable} act={act}
@@ -177,9 +178,9 @@ export function MapPanel({ graph, fallbackTitle, words, editable, act }) {
   return <>
     <PanelHeader eyebrow={`${words.kindLabel} 정보`} title={graph.map?.title || fallbackTitle} onClose={act.close} />
     <div className="fm-panel__body">
-      <DraftField label="지도 이름" value={graph.map?.title || ''} limit={TEXT_LIMITS.title} allowEmpty disabled={!editable} placeholder={fallbackTitle} testId="fm-map-title"
+      <DraftField store={act.drafts} draftKey={draftKey('map', 'header', 'title')} label="지도 이름" value={graph.map?.title || ''} limit={TEXT_LIMITS.title} allowEmpty disabled={!editable} placeholder={fallbackTitle} testId="fm-map-title"
         clean={(text) => cleanLabel(text, TEXT_LIMITS.title)} onCommit={(title) => act.send({ type: 'setMapHeader', title: title || null }, '지도 이름 바꾸기')} />
-      <DraftField label="한 줄 설명" value={graph.map?.description || ''} limit={TEXT_LIMITS.description} allowEmpty disabled={!editable} testId="fm-map-description"
+      <DraftField store={act.drafts} draftKey={draftKey('map', 'header', 'description')} label="한 줄 설명" value={graph.map?.description || ''} limit={TEXT_LIMITS.description} allowEmpty disabled={!editable} testId="fm-map-description"
         placeholder="이 지도가 보여 주는 것" clean={(text) => cleanLabel(text, TEXT_LIMITS.description)}
         onCommit={(description) => act.send({ type: 'setMapHeader', description: description || null }, '지도 설명 바꾸기')} />
       <p className="fm-muted">단계 {graph.steps.length}개 · 화살표 {graph.arrows.length}개 · {words.lanes} {graph.lanes.length}개 · 표시 {graph.tags.length}개</p>

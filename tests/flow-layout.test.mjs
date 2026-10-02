@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { graphOf, parseFlow } from '../harness/flow/flowModel.js';
 import { generatedFlow } from '../harness/flow/fixtures.js';
 import { cardSize, flowOrientation, layoutFlow, rankFlow } from '../src/flow/flowLayout.js';
+import { fitViewport, openingViewport } from '../src/flow/FlowCanvas.jsx';
 
 const read = (name) => graphOf(parseFlow(fs.readFileSync(new URL(`../examples/sample-project/docs/maps/${name}`, import.meta.url), 'utf8')));
 const lending = read('02-lending.mmd');
@@ -208,5 +209,20 @@ describe('flow map layout', () => {
       expect(inside({ x: arrow.points[0].x - 1, y: arrow.points[0].y }, { ...source, x: source.x - 1, width: source.width + 2 }, 0)).toBe(true);
       expect(inside({ x: arrow.points.at(-1).x + 1, y: arrow.points.at(-1).y }, { ...target, x: target.x - 1, width: target.width + 2 }, 0)).toBe(true);
     }
+  });
+});
+
+describe('flow map opening view', () => {
+  it('opens a long map at a readable size from its start, and a small map whole', () => {
+    const wide = layoutFlow(lending).bounds;
+    expect(fitViewport(wide, 1284, 700).zoom).toBeLessThan(.7);
+    expect(openingViewport(wide, 1284, 700)).toEqual({ x: 28, y: 28, zoom: .9, whole: false });
+    expect(openingViewport(wide, 300, 600).zoom).toBe(.75);
+    const tall = layoutFlow(system).bounds;
+    const top = openingViewport(tall, 1440, 760);
+    expect(top).toMatchObject({ y: 28, zoom: .9, whole: false });
+    expect(top.x).toBe(Math.round((1440 - tall.width * .9) / 2));
+    const small = layoutFlow(flow(['subgraph a["가"]', '  one["하나"]', '  two["둘"]', 'end', 'one --> two'])).bounds;
+    expect(openingViewport(small, 1284, 700)).toMatchObject({ zoom: 1, whole: true });
   });
 });

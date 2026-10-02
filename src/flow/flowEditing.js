@@ -1,4 +1,5 @@
 // Pure helpers that turn canvas intentions into flow map operations.
+import { sourceProblemReason } from '../mapKinds.js';
 import { DASHED_PATTERN, NEW_STEP_LABEL, SHARED_BAND_ID, TAG_PALETTE, TEXT_LIMITS } from './flowConstants.js';
 
 export const arrowKey = (arrow) => `${arrow.source}->${arrow.target}`;
@@ -178,14 +179,18 @@ export function pushHistory(stack, entry, limit = 100) {
   return [...stack, entry].slice(-limit);
 }
 
-/** Plain Korean for a failed save. */
-export function describeError(error) {
+/** Plain Korean for a failed save; the server's own words stay in `detail`. */
+export function describeError(error, kind) {
   const code = error?.body?.code;
   const line = error?.body?.details?.line ?? error?.body?.line;
   if (error?.status === 409 || code === 'revision_conflict') return { kind: 'conflict', text: '다른 곳에서 지도가 바뀌었어요. 쓰던 내용은 그대로 두었으니 확인하고 다시 저장해 주세요.' };
   if (code === 'invalid_source') return { kind: 'invalid', text: '원문에 고칠 곳이 있어서 지금은 저장할 수 없어요.' };
   if (code === 'read_only_map') return { kind: 'readonly', text: '이 지도는 읽기만 할 수 있어요.' };
-  if (error?.status === 422) return { kind: 'validation', line, text: line ? `${line}번째 줄을 확인해 주세요.` : '입력한 내용을 저장할 수 없어요.', detail: error?.body?.message || error?.message };
+  if (error?.status === 422) {
+    const { reason, detail } = sourceProblemReason(error?.body?.message || error?.message, kind);
+    const text = line ? `${line}번째 줄: ${reason || '지도 형식에 맞지 않는 내용이 있어요.'}` : reason || '입력한 내용을 저장할 수 없어요.';
+    return { kind: 'validation', line, text, reason, detail };
+  }
   if (error?.status === 404) return { kind: 'missing', text: '지도를 찾을 수 없어요.' };
   return { kind: 'offline', text: '연결이 끊겨 저장하지 못했어요. 쓰던 내용은 그대로 있어요.' };
 }

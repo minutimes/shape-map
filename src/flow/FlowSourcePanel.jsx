@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import FlowIcon from './FlowIcon.jsx';
+import { ProblemDetail } from './FlowFields.jsx';
 
 const LINE = 19;
 const PAD = 12;
 
 /** The Mermaid source, editable as text. Server errors are shown at their line. */
-export default function FlowSourcePanel({ source, editable, invalid, onApply, onClose, onCopy }) {
+export default function FlowSourcePanel({ source, editable, invalid, invalidReason, onApply, onClose, onCopy }) {
   const [text, setText] = useState(source || '');
   const [dirty, setDirty] = useState(false);
   const [problem, setProblem] = useState(null);
@@ -42,8 +43,8 @@ export default function FlowSourcePanel({ source, editable, invalid, onApply, on
       : '그림과 같은 내용이에요. 고친 뒤 적용하면 그림이 바뀌고, 되돌리기로 돌아갈 수 있어요.'}</p>
     {(problem || (invalid && !dirty)) && <div className={`fm-source__problem${problem?.kind === 'conflict' ? ' is-conflict' : ''}`} role="alert" data-testid="fm-source-problem">
       <FlowIcon name="alert" size={14} />
-      <div><strong>{problem ? problem.text : `${invalid.line ? `${invalid.line}번째 줄을 ` : ''}확인해 주세요.`}</strong>
-        {(problem?.detail || (!problem && invalid?.error)) && <small>{problem?.detail || invalid.error}</small>}
+      <div><strong>{problem ? problem.text : invalidReason?.text}</strong>
+        <ProblemDetail detail={problem ? problem.detail : invalidReason?.detail} />
         {problem?.kind === 'conflict' && <div className="fm-row">
           <button type="button" className="fm-button fm-button--dark" onClick={apply}>내 내용 다시 적용</button>
           <button type="button" className="fm-button" onClick={() => { setText(source || ''); setDirty(false); setProblem(null); }}>새 원문 불러오기</button>

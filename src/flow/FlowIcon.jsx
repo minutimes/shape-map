@@ -12,6 +12,7 @@ const EXTRA = {
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-9h.01" /></>,
   link: <><path d="M9 15 15 9M10 6l1-1a4 4 0 0 1 6 6l-1 1M14 18l-1 1a4 4 0 0 1-6-6l1-1" /></>,
   lane: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9.5h18M3 15h18" /></>,
+  overview: <><rect x="3" y="5" width="18" height="14" rx="2" /><rect x="6.5" y="8.5" width="7" height="5" rx="1" /></>,
 };
 
 export default function FlowIcon({ name, size = 16, ...props }) {

@@ -25,6 +25,8 @@
 .fm-save.is-issue { color: #8c6a20; }
 .fm-save.is-issue > i { background: #c4952f; }
 @keyframes fm-pulse { 50% { opacity: .25; } }
+.fm-unsaved { min-height: 26px; padding: 0 9px; margin-right: 6px; border: 1px solid #ecd0cb; border-radius: 13px; background: #fff7f6; color: #9a433b; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.fm-unsaved:hover { border-color: #c98b84; }
 
 .fm-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px 11px; border-bottom: 1px solid var(--fm-line); min-width: 0; }
 .fm-toolbar__tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
@@ -178,6 +180,9 @@ button.fm-rail__title:hover { text-decoration: underline; text-underline-offset:
 .fm-zoom button { width: 30px; height: 30px; border: 0; background: transparent; border-radius: 7px; display: grid; place-items: center; color: #66666f; padding: 0; }
 .fm-zoom button:hover { background: #f0f0f3; color: var(--fm-ink); }
 .fm-zoom .fm-zoom__value { width: 46px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.fm-zoom button.is-on { background: #ececf0; color: var(--fm-ink); }
+.fm-canvas .react-flow__minimap { right: 14px; bottom: 58px; margin: 0; border: 1px solid #dddde4; border-radius: 8px; background: #fff; overflow: hidden; box-shadow: 0 2px 8px rgba(30, 30, 44, .06); z-index: 5; }
+.fm-canvas .react-flow__minimap-mask { stroke: var(--fm-ink); stroke-width: 1.5; }
 
 /* Panels */
 .fm-panel { position: absolute; top: 10px; right: 10px; bottom: 10px; z-index: 8; width: 344px; display: flex; flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #e2e2e7; border-radius: 13px; box-shadow: 0 12px 32px rgba(30, 30, 44, .1), 0 2px 6px rgba(30, 30, 44, .05); }
@@ -248,13 +253,18 @@ button.fm-rail__title:hover { text-decoration: underline; text-underline-offset:
 .fm-check { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; font-size: 12px; }
 .fm-check small { flex-basis: 100%; padding-left: 22px; font-size: 10.5px; color: var(--fm-muted); }
 
+/* A disclosure that keeps the server's own words out of the way. */
+.fm-detail { margin-top: 4px; font-size: 11px; color: inherit; }
+.fm-detail summary { display: inline; cursor: pointer; color: #77777f; text-decoration: underline; text-underline-offset: 3px; list-style: none; }
+.fm-detail summary::-webkit-details-marker { display: none; }
+.fm-detail code { display: block; margin-top: 4px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 255, 255, .7); font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #6a6a73; overflow-wrap: anywhere; white-space: pre-wrap; }
+
 /* Source */
 .fm-source { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .fm-source__lead { margin: 10px 18px 0; font-size: 11.5px; line-height: 1.6; color: var(--fm-muted); }
 .fm-source__problem { display: flex; gap: 9px; margin: 10px 18px 0; padding: 10px 12px; border: 1px solid #efd3ce; border-radius: 10px; background: #fff6f4; color: #7a3530; font-size: 12px; line-height: 1.5; }
 .fm-source__problem > svg { flex-shrink: 0; margin-top: 2px; }
 .fm-source__problem strong { display: block; font-weight: 640; }
-.fm-source__problem small { display: block; margin-top: 2px; color: #996660; font-size: 11px; overflow-wrap: anywhere; }
 .fm-source__problem .fm-row { margin-top: 8px; }
 .fm-source__problem.is-conflict { border-color: #ecdcbc; background: #fffaf0; color: #6b5220; }
 .fm-source__editor { position: relative; flex: 1; min-height: 120px; display: flex; overflow: hidden; margin: 12px 18px 0; border: 1px solid #e3e3e8; border-radius: 10px; background: #fbfbfc; }
@@ -312,7 +322,10 @@ button.fm-rail__title:hover { text-decoration: underline; text-underline-offset:
   .fm-rail__add > span { display: none; }
   .fm-panel, .fm-panel--wide { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 64%; border-radius: 14px; }
   .fm-panel--wide { top: 8px; max-height: none; }
-  .has-panel .fm-zoom { display: none; }
+  .has-panel .fm-zoom, .has-panel .react-flow__minimap { display: none; }
+  .fm-canvas .react-flow__minimap { right: 10px; bottom: 52px; }
+  .fm-canvas .react-flow__minimap.is-wide svg { width: 150px; height: 76px; }
+  .fm-canvas .react-flow__minimap.is-tall svg { width: 92px; height: 120px; }
   .fm-zoom { right: 10px; bottom: 10px; }
   .fm-toast { bottom: 12px; }
 }

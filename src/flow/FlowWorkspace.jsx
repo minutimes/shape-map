@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import './flow.css';
@@ -12,6 +12,9 @@ import { ArrowPanel, LanePanel, MapPanel, StepPanel, TagsPanel } from './FlowPan
 import FlowSourcePanel from './FlowSourcePanel.jsx';
 import { TagChip } from './FlowElements.jsx';
 import FlowIcon from './FlowIcon.jsx';
+import { ProblemDetail } from './FlowFields.jsx';
+import { readOnlyReason } from '../mapKinds.js';
+import { createDraftStore, parseDraftKey } from './flowDrafts.js';
 
 const EMPTY_GRAPH = { map: {}, lanes: [], steps: [], arrows: [], tags: [] };
 const isTextTarget = (target) => Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
@@ -23,10 +26,14 @@ function writePreference(key, value) {
   try { window.localStorage.setItem(key, value ? '1' : '0'); } catch { /* the toggle still works for this visit */ }
 }
 
-function SaveState({ pending, connection, invalid, editable }) {
+function SaveState({ pending, connection, invalid, editable, unsaved, onShowUnsaved }) {
   const text = invalid ? '원문 확인 필요' : !editable ? '읽기 전용' : pending ? '저장 중…' : connection === 'online' ? '저장됨' : connection === 'offline' ? '연결 확인 중' : '여는 중';
   const issue = invalid || connection === 'offline';
-  return <span className={`fm-save${issue ? ' is-issue' : ''}${pending ? ' is-pending' : ''}`} role="status" data-testid="fm-save-state"><i aria-hidden="true" /><span>{text}</span></span>;
+  return <>
+    <span className={`fm-save${issue ? ' is-issue' : ''}${pending ? ' is-pending' : ''}`} role="status" data-testid="fm-save-state"><i aria-hidden="true" /><span>{text}</span></span>
+    {unsaved > 0 && <button type="button" className="fm-unsaved" onClick={onShowUnsaved} data-testid="fm-unsaved" title="저장하지 못한 글이 있어요. 눌러서 열기">
+      저장 안 된 글 {unsaved}</button>}
+  </>;
 }
 
 function ArrowLegend() {
@@ -55,6 +62,8 @@ function FlowStudio({ api, map }) {
   const [revealId, setRevealId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
   const snapshotRef = useRef(null);
+  const drafts = useMemo(() => createDraftStore(), []);
+  useSyncExternalStore(drafts.subscribe, drafts.version, drafts.version);
   const historyRef = useRef(history); historyRef.current = history;
   const queue = useRef(Promise.resolve());
   const clientId = useRef(`flow-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`);
@@ -97,6 +106,7 @@ function FlowStudio({ api, map }) {
 
   const kind = snapshot?.kind && snapshot.kind !== 'other' ? snapshot.kind : snapshot?.graph?.map?.kind || map?.kind;
   const words = flowVocabulary(kind);
+  const kindRef = useRef(kind); kindRef.current = kind;
   const graph = snapshot?.graph || null;
   const safeGraph = graph || EMPTY_GRAPH;
   const invalid = snapshot && snapshot.sourceStatus?.valid === false ? snapshot.sourceStatus : null;
@@ -118,9 +128,9 @@ function FlowStudio({ api, map }) {
       if (options.select !== undefined) setSelection(options.select);
       return { ok: true, snapshot: next, before };
     } catch (error) {
-      const info = describeError(error);
+      const info = describeError(error, kindRef.current);
       if (error?.body?.snapshot) accept(error.body.snapshot);
-      if (!options.quiet) notify(info.kind === 'validation' && info.detail ? `${info.text} ${info.detail}` : info.text, true);
+      if (!options.quiet) notify(info.text, true);
       return { ok: false, ...info, message: info.text };
     } finally {
       setPending((count) => count - 1);
@@ -181,6 +191,7 @@ function FlowStudio({ api, map }) {
   }, []);
 
   const act = useMemo(() => ({
+    drafts,
     send: (operation, label, options) => send(operation, label, options),
     select,
     close: () => { setPanel(null); setSelection(null); },
@@ -212,7 +223,13 @@ function FlowStudio({ api, map }) {
       const result = await send({ type: 'removeArrow', source: arrow.source, target: arrow.target }, '화살표 지우기', { select: null });
       if (result.ok) { setPanel(null); notify('화살표를 지웠어요.'); }
     },
-  }), [send, select, notify, openCreated, words]);
+  }), [drafts, send, select, notify, openCreated, words]);
+  const showUnsaved = () => {
+    const [key] = drafts.failed()[0] || [];
+    if (!key) return;
+    const { kind: element, id } = parseDraftKey(key);
+    if (element === 'map') { setSelection(null); setPanel('map'); } else select({ kind: element, id });
+  };
 
   useEffect(() => {
     const onKey = (event) => {
@@ -270,6 +287,7 @@ function FlowStudio({ api, map }) {
   const selectedLane = selection?.kind === 'lane' ? safeGraph.lanes.find((lane) => lane.id === selection.id) : null;
   const toggleNotes = () => { setNotes((value) => { writePreference(notesKey, !value); return !value; }); };
   const hasNotes = safeGraph.steps.some((step) => step.summary);
+  const invalidReason = invalid ? readOnlyReason({ sourceStatus: invalid, kind }) : null;
 
   return <div className={`fm-workspace${panel ? ' has-panel' : ''}`} ref={rootRef} data-testid="fm-workspace" data-kind={kind}>
     <header className="fm-header">
@@ -279,7 +297,7 @@ function FlowStudio({ api, map }) {
         {graph && <button type="button" className="fm-icon-button" aria-label="지도 이름과 설명 보기" title="지도 정보" onClick={() => { setSelection(null); setPanel('map'); }}><FlowIcon name={editable ? 'pencil' : 'info'} size={14} /></button>}
       </div>
       <div className="fm-header__actions">
-        <SaveState pending={pending} connection={connection} invalid={Boolean(invalid)} editable={editable} />
+        <SaveState pending={pending} connection={connection} invalid={Boolean(invalid)} editable={editable} unsaved={drafts.failed().length} onShowUnsaved={showUnsaved} />
         {editable && <>
           <button type="button" className="fm-icon-button" aria-label="되돌리기" title="되돌리기 (⌘Z)" disabled={!history.undo.length} onClick={() => travel('undo')} data-testid="fm-undo"><FlowIcon name="undo" size={15} /></button>
           <button type="button" className="fm-icon-button" aria-label="다시 하기" title="다시 하기 (⇧⌘Z)" disabled={!history.redo.length} onClick={() => travel('redo')} data-testid="fm-redo"><FlowIcon name="redo" size={15} /></button>
@@ -306,7 +324,8 @@ function FlowStudio({ api, map }) {
       </div>
     </div>}
     {invalid && <div className="fm-banner" role="alert" data-testid="fm-invalid-banner"><FlowIcon name="alert" size={15} />
-      <div><strong>원문에 고칠 곳이 있어요{invalid.line ? ` (${invalid.line}번째 줄)` : ''}.</strong> 파일을 고칠 때까지 편집을 잠시 멈췄어요. 그림은 마지막으로 읽은 내용이에요.</div>
+      <div><strong>{invalidReason.text}</strong> 파일을 고칠 때까지 편집을 잠시 멈췄어요. 그림은 마지막으로 읽은 내용이에요.
+        <ProblemDetail detail={invalidReason.detail} /></div>
       <button type="button" className="fm-button fm-button--small" onClick={() => setPanel('source')}>원문 보기</button></div>}
     {!invalid && snapshot.editable === false && <div className="fm-banner is-quiet" role="status"><FlowIcon name="info" size={15} /><div>이 지도는 읽기만 할 수 있어요.</div></div>}
     {(highlightTag || focusLane) && <div className="fm-filter-note" role="status">
@@ -329,7 +348,7 @@ function FlowStudio({ api, map }) {
         {panel === 'inspect' && selectedLane && <LanePanel lane={selectedLane} graph={safeGraph} words={words} editable={editable} act={act} focusLane={focusLane} focusLabel={focusLabel === selectedLane.id} />}
         {panel === 'map' && <MapPanel graph={safeGraph} fallbackTitle={fallbackTitle} words={words} editable={editable} act={act} />}
         {panel === 'tags' && <TagsPanel graph={safeGraph} editable={editable} act={act} highlight={highlightTag} onHighlight={setHighlightTag} />}
-        {panel === 'source' && <FlowSourcePanel source={snapshot.source} editable={editable} invalid={invalid}
+        {panel === 'source' && <FlowSourcePanel source={snapshot.source} editable={editable} invalid={invalid} invalidReason={invalidReason}
           onClose={() => setPanel(null)} onCopy={(text) => act.copy(text, '원문을 복사했어요.')}
           onApply={(text) => send({ type: 'replaceSource', source: text }, '원문 고치기', { quiet: true })} />}
       </aside>}

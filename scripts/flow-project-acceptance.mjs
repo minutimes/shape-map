@@ -161,7 +161,11 @@ async function run() {
     check('user flow opens in the shell', (await page.locator('.fm-kind').innerText()) === '유저 플로우');
     const read = await geometry(page);
     check('every step is drawn without overlap', read.cards === 21 && read.overlaps === 0, JSON.stringify(read));
-    await screenshot(page, 'shell-user-flow-1440', 'User flow tab in the real shell, fitted on open.');
+    const zoom = Number((await page.locator('.fm-zoom__value').innerText()).replace('%', ''));
+    check('a long user flow opens readable with the overview', zoom >= 85 && await page.locator('.react-flow__minimap').isVisible(), `${zoom}%`);
+    await screenshot(page, 'shell-user-flow-1440', 'User flow tab in the real shell: opens at 90% at the start of every lane, with the overview.');
+    await page.getByRole('button', { name: '지도 전체 보기' }).click();
+    await page.waitForTimeout(300);
 
     // Edit through the server and undo byte for byte.
     await page.getByTestId('fm-step-reader_search').click();
@@ -222,7 +226,10 @@ async function run() {
     await page.getByTestId('fm-source-text').fill(sourceText.replace('reader_open --> reader_search', 'reader_open --> reader_search & nowhere'));
     await page.getByTestId('fm-source-apply').click();
     const problem = await page.getByTestId('fm-source-problem').innerText();
-    check('a source error is shown at its line', problem.includes(`${brokenLine}번째 줄`), problem.replace(/\n/g, ' '));
+    const headline = await page.locator('[data-testid="fm-source-problem"] strong').innerText();
+    check('a source error is shown at its line in plain Korean', headline.includes(`${brokenLine}번째 줄`) && !/[A-Za-z]{3,}/.test(headline), headline);
+    await page.locator('[data-testid="fm-source-problem"] summary').click();
+    check('the server words stay behind 자세히', /instead of &/.test(await page.locator('[data-testid="fm-source-problem"] .fm-detail code').innerText()), problem.replace(/\n/g, ' '));
     await screenshot(page, 'shell-source-error-1440', 'Source view showing the server validation error at its line.');
     await page.getByTestId('fm-source-text').fill(sourceText.replace('"앱 열기"', '"앱 켜기"'));
     await page.getByTestId('fm-source-apply').click();
@@ -234,7 +241,9 @@ async function run() {
     const good = await fs.readFile(lendingFile, 'utf8');
     await fs.writeFile(lendingFile, good.replace('  reader_open --> reader_search', '  reader_open --- reader_search'));
     await page.getByTestId('fm-invalid-banner').waitFor({ timeout: 10000 });
-    check('a broken file shows a calm banner and pauses editing', !(await page.getByTestId('fm-undo').count()), await page.getByTestId('fm-invalid-banner').innerText());
+    const banner = await page.locator('[data-testid="fm-invalid-banner"] strong').innerText();
+    check('a broken file shows a calm Korean banner and pauses editing', !(await page.getByTestId('fm-undo').count()) && banner.includes('연결선에 화살표가 없어요') && !/[A-Za-z]{3,}/.test(banner), banner);
+    await page.locator('[data-testid="fm-invalid-banner"] summary').click();
     await screenshot(page, 'shell-invalid-1440', 'The file broke after opening: banner with its line, last good picture kept.');
     await fs.writeFile(lendingFile, good);
     await until(async () => !(await page.getByTestId('fm-invalid-banner').count()), { timeout: 10000, message: 'banner did not clear' });
@@ -244,6 +253,8 @@ async function run() {
     await page.getByRole('button', { name: /^시스템 플로우/ }).click();
     await page.locator('[data-testid="fm-workspace"][data-kind="system-flow"]').waitFor();
     await page.locator('.react-flow__node[data-id="receive"]').waitFor();
+    await page.getByRole('button', { name: '지도 전체 보기' }).click();
+    await page.waitForTimeout(300);
     const system = await geometry(page);
     check('system flow opens as a flowchart without a lane rail', (await page.locator('.fm-rail').count()) === 0 && system.overlaps === 0, JSON.stringify(system));
     await screenshot(page, 'shell-system-flow-1440', 'System flow tab in the real shell.');
@@ -259,28 +270,30 @@ async function run() {
       await page.goto(`${origin}/?project=real-size&map=${extra.name}`);
       await page.getByTestId('fm-workspace').waitFor();
       await page.locator('.react-flow__node[data-id]').first().waitFor();
+      await page.getByRole('button', { name: '지도 전체 보기' }).click();
+      await page.waitForTimeout(300);
       const measured = await geometry(page);
       const api = await apiMap(extra.name, 'real-size');
       check(`real-size ${extra.name} reads cleanly`, api.sourceStatus?.valid && measured.overlaps === 0 && measured.cards === api.graph.steps.length, JSON.stringify({ ...measured, steps: api.graph.steps.length, error: api.sourceStatus?.error }));
-      await screenshot(page, `real-${extra.name.replace(/\.mmd$/, '')}-1440`, `Real-size ${extra.kind} (${api.graph.steps.length} steps) at 1440×900.`);
-      await page.locator('.fm-zoom__value').click();
-      await page.waitForTimeout(300);
-      await screenshot(page, `real-${extra.name.replace(/\.mmd$/, '')}-100`, `Real-size ${extra.kind} at 100%.`);
     }
 
-    for (const [width, height] of [[1024, 768], [390, 844]]) {
-      const small = await browser.newPage({ viewport: { width, height } });
+    // Opening views at three sizes, each in a fresh browser without a remembered view.
+    const views = [['bookshelf', '02-lending.mmd'], ['bookshelf', '03-lending-system.mmd'], ...workspace.extras.map((extra) => ['real-size', extra.name])];
+    for (const [width, height] of [[1440, 900], [1024, 768], [390, 844]]) {
+      const fresh = await browser.newContext({ viewport: { width, height } });
+      const small = await fresh.newPage();
       small.on('pageerror', (error) => errors.push(error.message));
-      for (const map of ['02-lending.mmd', '03-lending-system.mmd']) {
-        await small.goto(`${origin}/?project=bookshelf&map=${map}`);
+      for (const [project, map] of views) {
+        await small.goto(`${origin}/?project=${project}&map=${map}`);
         await small.getByTestId('fm-workspace').waitFor();
         await small.locator('.react-flow__node[data-id]').first().waitFor();
         await small.waitForTimeout(300);
         const measured = await geometry(small);
-        check(`${map} at ${width}px has no page scroll or overlap`, measured.overflow <= 0 && measured.overlaps === 0, JSON.stringify(measured));
-        await screenshot(small, `shell-${map.replace(/\.mmd$/, '')}-${width}`, `${map} in the shell at ${width}×${height}.`);
+        const zoom = Number((await small.locator('.fm-zoom__value').innerText()).replace('%', ''));
+        check(`${map} opens readable at ${width}px`, measured.overflow <= 0 && measured.overlaps === 0 && zoom >= 70, JSON.stringify({ ...measured, zoom }));
+        await screenshot(small, `open-${map.replace(/\.mmd$/, '')}-${width}`, `${map} as it opens at ${width}×${height} (${zoom}%).`);
       }
-      await small.close();
+      await fresh.close();
     }
     check('no page errors', errors.length === 0, errors.join(' | '));
   } finally {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Background, BackgroundVariant, ConnectionMode, ReactFlow, useReactFlow, useViewport } from '@xyflow/react';
+import { Background, BackgroundVariant, ConnectionMode, MiniMap, ReactFlow, useReactFlow, useViewport } from '@xyflow/react';
 import { useCenteredZoom } from '../useCenteredZoom.js';
 import { SHARED_BAND_ID } from './flowConstants.js';
 import { FLOW_METRICS } from './flowLayout.js';
@@ -11,7 +11,8 @@ const edgeTypes = { flow: FlowArrow };
 export const MIN_ZOOM = .08;
 export const MAX_ZOOM = 2;
 const FIT_PADDING = 28;
-const READABLE_ZOOM = .6;
+const FIT_READABLE_ZOOM = .7;
+const OVERVIEW_KEY = 'shape-map:flow-overview';
 
 /** Fits the whole map, never above 100%, from the top and centered across. */
 export function fitViewport(bounds, width, height) {
@@ -23,15 +24,16 @@ export function fitViewport(bounds, width, height) {
 }
 
 /**
- * The first view of a map. A phone-width canvas cannot show a long flow at a
- * readable size, so it opens at the start of the flow instead of shrinking it.
+ * The first view of a map. When the whole map would be too small to read, it
+ * opens at a readable size at the start of the flow: the left end of the
+ * lanes, or the top of a vertical flowchart. The fit button still shows all.
  */
 export function openingViewport(bounds, width, height) {
   const fitted = fitViewport(bounds, width, height);
-  if (width >= 640 || fitted.zoom >= READABLE_ZOOM) return fitted;
-  const zoom = READABLE_ZOOM;
+  if (fitted.zoom >= FIT_READABLE_ZOOM) return { ...fitted, whole: true };
+  const zoom = width < 640 ? .75 : .9;
   const x = bounds.width * zoom <= width - FIT_PADDING * 2 ? (width - bounds.width * zoom) / 2 : FIT_PADDING;
-  return { x: Math.round(x - bounds.x * zoom), y: Math.round(FIT_PADDING - bounds.y * zoom), zoom };
+  return { x: Math.round(x - bounds.x * zoom), y: Math.round(FIT_PADDING - bounds.y * zoom), zoom, whole: false };
 }
 
 export function viewportKey(map) {
@@ -98,7 +100,7 @@ function LaneRail({ layout, graph, words, tagsById, selectedLane, focusLane, emp
   </nav>;
 }
 
-function ZoomControls({ canvasRef, onFit }) {
+function ZoomControls({ canvasRef, onFit, overview, onToggleOverview }) {
   const { zoom } = useViewport();
   // Handles and the drop zone keep a usable on-screen size at any zoom.
   useEffect(() => { canvasRef.current?.style.setProperty('--fm-zoom', String(zoom)); }, [canvasRef, zoom]);
@@ -108,6 +110,7 @@ function ZoomControls({ canvasRef, onFit }) {
     <button type="button" className="fm-zoom__value" onClick={() => zoomTo(1)} title="실제 크기로 보기" aria-label={`지금 ${Math.round(zoom * 100)}%, 실제 크기로 보기`}>{Math.round(zoom * 100)}%</button>
     <button type="button" onClick={() => zoomIn()} aria-label="확대"><FlowIcon name="plus" size={14} /></button>
     <button type="button" onClick={onFit} aria-label="지도 전체 보기" title="전체 보기"><FlowIcon name="fit" size={14} /></button>
+    <button type="button" className={overview ? 'is-on' : undefined} onClick={onToggleOverview} aria-pressed={overview} aria-label="전체 모습 작게 보기" title="전체 모습 작게 보기" data-testid="fm-overview-toggle"><FlowIcon name="overview" size={14} /></button>
   </div>;
 }
 
@@ -115,6 +118,13 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
   const canvasRef = useRef(null);
   const flow = useReactFlow();
   const fitted = useRef(false);
+  const [overview, setOverviewState] = useState(() => { try { const value = window.localStorage.getItem(OVERVIEW_KEY); return value == null ? null : value === '1'; } catch { return null; } });
+  const setOverview = useCallback((next) => setOverviewState(next), []);
+  const toggleOverview = () => setOverviewState((current) => {
+    const value = !current;
+    try { window.localStorage.setItem(OVERVIEW_KEY, value ? '1' : '0'); } catch { /* the toggle still works for this visit */ }
+    return value;
+  });
   const tagsById = useMemo(() => new Map(graph.tags.map((tag) => [tag.id, tag])), [graph.tags]);
   const selectedStep = selection?.kind === 'step' ? selection.id : null;
   const selectedArrow = selection?.kind === 'arrow' ? selection.id : null;
@@ -160,7 +170,11 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
     const frame = requestAnimationFrame(() => {
       const element = canvasRef.current; if (!element) return;
       const { width, height } = element.getBoundingClientRect();
-      flow.setViewport(readViewport(storageKey) || openingViewport(layout.bounds, width, height), { duration: 0 });
+      const opening = openingViewport(layout.bounds, width, height);
+      const { whole, ...viewport } = opening;
+      flow.setViewport(readViewport(storageKey) || viewport, { duration: 0 });
+      // The overview starts open when the map does not fit, unless the person chose before.
+      setOverview((current) => current ?? (!whole && width >= 640));
       fitted.current = true;
     });
     return () => cancelAnimationFrame(frame);
@@ -210,8 +224,10 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
         connectionMode={ConnectionMode.Strict} connectionRadius={34} connectionLineStyle={{ stroke: '#28282c', strokeWidth: 1.5, strokeDasharray: '4 4' }}
         onlyRenderVisibleElements={layout.cards.length > 160} colorMode="light" defaultViewport={{ x: 0, y: 0, zoom: .5 }}>
         {!showRail && <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d7d7dc" />}
+        {overview && <MiniMap pannable zoomable ariaLabel="지도 전체 모습" className={columns ? 'is-tall' : 'is-wide'} style={columns ? { width: 120, height: 160 } : { width: 200, height: 100 }} maskColor="rgba(245, 245, 247, .72)"
+          nodeColor={(node) => (node.selected ? '#28282c' : node.data?.tags?.[0]?.stroke ? `${node.data.tags[0].stroke}99` : '#c4c4cc')} nodeBorderRadius={3} />}
       </ReactFlow>
-      <ZoomControls canvasRef={canvasRef} onFit={() => fit(180)} />
+      <ZoomControls canvasRef={canvasRef} onFit={() => fit(180)} overview={Boolean(overview)} onToggleOverview={toggleOverview} />
     </div>
   </div>;
 }

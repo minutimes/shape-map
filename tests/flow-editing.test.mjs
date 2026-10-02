@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { applyOperation, graphOf, parseFlow, serializeFlow } from '../harness/flow/flowModel.js';
 import { createFakeFlowApi } from '../harness/flow/fakeApi.js';
 import { FLOW_VOCABULARY, flowVocabulary, TAG_PALETTE } from '../src/flow/flowConstants.js';
+import { MAP_KIND_LABELS, readOnlyReason, sourceProblemReason } from '../src/mapKinds.js';
 import {
   changeLaneOperation, cleanLabel, cleanSummary, connectOperation, connectableTargets, deleteLanePlan, describeError, emphasisFor,
   insertOnArrowOperation, laneStepOperation, moveLaneOperation, newIdAfter, newTagId, nextStepOperation, paletteIndexFor, pushHistory,
@@ -22,6 +23,19 @@ describe('flow map vocabulary', () => {
     expect(flowVocabulary('system-flow').lane).toBe('영역');
     expect(flowVocabulary('unknown')).toBe(FLOW_VOCABULARY['user-flow']);
     for (const words of Object.values(FLOW_VOCABULARY)) expect(JSON.stringify(Object.keys(words).sort())).toBe(JSON.stringify(Object.keys(FLOW_VOCABULARY['user-flow']).sort()));
+  });
+
+  it('shares kind names with the shell and says lane-specific reasons in the kind\'s words', () => {
+    expect(FLOW_VOCABULARY['user-flow'].kindLabel).toBe(MAP_KIND_LABELS['user-flow']);
+    expect(FLOW_VOCABULARY['system-flow'].laneAdd).toBe('영역 추가');
+    const inside = 'Line 9: only steps and arrows between them may appear inside a lane: style a fill:#fff';
+    expect(sourceProblemReason(inside, 'user-flow').reason).toBe('참여자 줄 안에 둘 수 없는 내용이 있어요.');
+    expect(sourceProblemReason(inside, 'system-flow').reason).toBe('영역 안에 둘 수 없는 내용이 있어요.');
+    expect(sourceProblemReason('Line 4: lane room is missing its end line.', 'system-flow').reason).toBe('영역이 end 줄로 닫히지 않았어요.');
+    expect(sourceProblemReason('Line 4: lanes cannot be nested.', 'user-flow').reason).toBe('참여자 줄 안에 또 참여자 줄을 넣을 수 없어요.');
+    expect(sourceProblemReason(inside, 'system-flow').detail).toBe('only steps and arrows between them may appear inside a lane: style a fill:#fff');
+    expect(readOnlyReason({ kind: 'system-flow', error: inside, line: 9 })).toMatchObject({ text: '9번째 줄을 읽지 못했어요. 영역 안에 둘 수 없는 내용이 있어요.', line: 9 });
+    expect(readOnlyReason({ sourceStatus: { error: inside, line: 9 }, kind: 'user-flow' }).text).toContain('참여자 줄');
   });
 });
 
@@ -136,7 +150,11 @@ describe('flow map editing helpers', () => {
 
   it('explains failures in plain Korean', () => {
     expect(describeError({ status: 409, body: { code: 'revision_conflict' } }).kind).toBe('conflict');
-    expect(describeError({ status: 422, body: { code: 'validation_error', message: 'x', details: { line: 7 } } })).toMatchObject({ kind: 'validation', line: 7, text: '7번째 줄을 확인해 주세요.' });
+    expect(describeError({ status: 422, body: { code: 'validation_error', message: 'Line 7: use one arrow per pair of steps instead of &: a --> b & c', details: { line: 7 } } }))
+      .toMatchObject({ kind: 'validation', line: 7, text: '7번째 줄: 연결선 하나에 여러 단계를 묶었어요.', detail: 'use one arrow per pair of steps instead of &: a --> b & c' });
+    expect(describeError({ status: 422, body: { code: 'validation_error', message: 'Steps a and b are already connected.' } }).text).toBe('같은 두 단계를 잇는 화살표가 이미 있어요.');
+    expect(describeError({ status: 422, body: { code: 'validation_error', message: 'Lane does not exist: x' } }, 'system-flow').text).toBe('없는 영역을 가리키고 있어요.');
+    expect(describeError({ status: 422, body: { code: 'validation_error', message: 'Lane does not exist: x' } }, 'user-flow').text).toBe('없는 참여자를 가리키고 있어요.');
     expect(describeError({ status: 422, body: { code: 'invalid_source' } }).kind).toBe('invalid');
     expect(describeError(new TypeError('Failed to fetch')).kind).toBe('offline');
   });

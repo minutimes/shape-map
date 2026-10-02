@@ -1,36 +1,36 @@
-// Visible words for each flow map kind. The owner may rename them; keep them here only.
-export const FLOW_VOCABULARY = {
-  'user-flow': {
-    kindLabel: '유저 플로우',
-    lane: '참여자',
-    lanes: '참여자',
-    laneAdd: '참여자 추가',
-    laneNew: '새 참여자',
-    laneName: '참여자 이름',
-    laneDelete: '참여자 지우기',
-    laneFocus: '이 참여자만 보기',
+import { MAP_KIND_LABELS, laneWords } from '../mapKinds.js';
+
+// Visible words for each flow map kind. The kind names and lane nouns come
+// from src/mapKinds.js, so the shell, read-only view, and canvas agree.
+function vocabulary(kind, extra) {
+  const lane = laneWords(kind).noun;
+  return Object.freeze({
+    kindLabel: MAP_KIND_LABELS[kind],
+    lane,
+    lanes: lane,
+    laneAdd: `${lane} 추가`,
+    laneNew: `새 ${lane}`,
+    laneName: `${lane} 이름`,
+    laneDelete: `${lane} 지우기`,
+    laneFocus: `이 ${lane}만 보기`,
     laneOnly: (title) => `${title}만 보기`,
-    allLanes: '모든 참여자',
+    allLanes: `모든 ${lane}`,
+    ...extra,
+  });
+}
+
+export const FLOW_VOCABULARY = Object.freeze({
+  'user-flow': vocabulary('user-flow', {
     shared: '함께 쓰는 단계',
     sharedHint: '여러 참여자가 함께 거치는 단계',
     lanePlaceholder: '누구인지, 무엇을 하는지',
-  },
-  'system-flow': {
-    kindLabel: '시스템 플로우',
-    lane: '영역',
-    lanes: '영역',
-    laneAdd: '영역 추가',
-    laneNew: '새 영역',
-    laneName: '영역 이름',
-    laneDelete: '영역 지우기',
-    laneFocus: '이 영역만 보기',
-    laneOnly: (title) => `${title}만 보기`,
-    allLanes: '모든 영역',
+  }),
+  'system-flow': vocabulary('system-flow', {
     shared: '공통 단계',
     sharedHint: '어느 영역에도 속하지 않은 단계',
     lanePlaceholder: '무엇을 맡는 곳인지',
-  },
-};
+  }),
+});
 
 export const FLOW_KINDS = Object.keys(FLOW_VOCABULARY);
 

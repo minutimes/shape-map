@@ -79,6 +79,17 @@ async function cardsFitCanvas(page) {
   });
 }
 
+const zoomOf = async (page) => Number((await page.locator('.fm-zoom__value').innerText()).replace('%', ''));
+async function startVisible(page, ids) {
+  return page.evaluate((list) => {
+    const canvas = document.querySelector('[data-testid="fm-canvas"]').getBoundingClientRect();
+    return list.every((id) => {
+      const rect = document.querySelector(`.react-flow__node[data-id="${id}"]`).getBoundingClientRect();
+      return rect.left >= canvas.left && rect.right <= canvas.right && rect.top >= canvas.top && rect.bottom <= canvas.bottom;
+    });
+  }, ids);
+}
+
 async function selectStep(page, id) {
   await page.getByTestId(`fm-step-${id}`).click();
   await page.getByTestId('fm-panel').waitFor({ state: 'visible' });
@@ -99,13 +110,23 @@ async function run() {
   const cardCount = await page.locator('.react-flow__node[data-id]:not([data-id^="__"])').count();
   assert(cardCount === 21, `expected 21 steps, saw ${cardCount}`);
   assert(await page.locator('.fm-rail__band').count() === 4, 'every participant lane is in the rail');
-  assert(await cardsFitCanvas(page), 'the whole map fits the canvas on open');
+  const openZoom = await zoomOf(page);
+  assert(openZoom >= 85, `a long map opens at a readable size (${openZoom}%)`);
+  assert(await startVisible(page, ['reader_open', 'owner_list', 'catalog_send', 'platform_fill']), 'the start of every lane is visible on open');
+  assert(await page.locator('.react-flow__minimap').isVisible(), 'the overview is shown for a map that does not fit');
   assert(await noPageOverflow(page), 'no horizontal page scroll');
   assert((await page.locator('.fm-kind').innerText()) === '유저 플로우', 'kind label is shown');
   const fullLabel = await page.getByTestId('fm-arrow-label-reader_available->reader_wait').getAttribute('title');
   assert(fullLabel === '없어요', 'arrow labels keep their full text on hover');
-  report.checks.reading = { cardCount, fits: true };
-  await shot(page, 'flow-read-1440', 'User flow sample at 1440×900: four participant rows, whole map fitted on open.');
+  report.checks.reading = { cardCount, openZoom };
+  await shot(page, 'flow-read-1440', 'User flow sample at 1440×900: opens at 90% at the start of every lane, with the overview.');
+  await page.getByRole('button', { name: '지도 전체 보기' }).click();
+  await page.waitForTimeout(300);
+  assert(await cardsFitCanvas(page), 'the fit button shows the whole map');
+  await shot(page, 'flow-fit-1440', 'The same map after the fit button: the whole picture.');
+  await page.getByTestId('fm-overview-toggle').click();
+  assert(!(await page.locator('.react-flow__minimap').count()), 'the overview can be hidden');
+  await page.getByTestId('fm-overview-toggle').click();
 
   await page.getByTestId('fm-highlight-money').click();
   assert(await page.getByTestId('fm-step-reader_open').evaluate((node) => node.classList.contains('is-off')), 'tag highlight dims other steps');
@@ -232,8 +253,16 @@ async function run() {
   assert(await page.getByRole('alert').filter({ hasText: '다른 곳에서 지도가 바뀌었어요' }).count() > 0, 'conflict is explained');
   await page.evaluate(() => window.__flowHarness.setLatency(40));
   await shot(page, 'flow-conflict-1440', 'After a save conflict: the typed title stays in the field with a retry button.');
+  await selectStep(page, 'owner_accept');
+  assert((await page.getByTestId('fm-step-label').inputValue()) === '빌려줄지 정하기', 'another step shows its own text');
+  await page.getByTestId('fm-unsaved').waitFor();
+  await page.getByTestId('fm-unsaved').click();
+  await waitUntil(async () => (await page.getByTestId('fm-step-label').inputValue()) === '내 초안 제목', { message: 'the unsaved draft was lost after selecting another step' });
+  await shot(page, 'flow-unsaved-draft-1440', 'Back on the step after visiting another: the unsaved title is still there, with the header count.');
+  report.checks.draftKept = true;
   await page.getByRole('button', { name: '다시 저장' }).click();
   await waitUntil(async () => (await step(page, 'owner_check')).label === '내 초안 제목', { message: 'retry after conflict did not save' });
+  await waitUntil(async () => !(await page.getByTestId('fm-unsaved').count()), { message: 'the unsaved count did not clear after saving' });
   assert((await step(page, 'owner_accept')).label === '빌려줄지 정하기', 'the other change is kept');
   report.checks.conflict = true;
   await page.keyboard.press('Escape');
@@ -318,8 +347,8 @@ async function run() {
   await open(page, 'system');
   assert((await page.locator('.fm-kind').innerText()) === '시스템 플로우', 'system flow kind label');
   assert(await page.locator('.fm-rail').count() === 0, 'a lane-free system flow has no lane rail');
-  assert(await cardsFitCanvas(page), 'system flow fits on open');
-  await shot(page, 'flow-system-1440', 'Lane-free system flow drawn top to bottom as a flowchart, with the dashed undecided step.');
+  assert(await zoomOf(page) >= 85 && await startVisible(page, ['receive', 'stock']), 'a tall system flow opens readable at its top');
+  await shot(page, 'flow-system-1440', 'Lane-free system flow drawn top to bottom, opened at 90% at its top with the overview.');
   await page.getByRole('button', { name: '설명 보기', exact: true }).click();
   await page.locator('.fm-step__summary').first().waitFor();
   report.checks.system = true;
@@ -331,16 +360,16 @@ async function run() {
   for (let index = 0; index < 10; index += 1) await page.mouse.wheel(0, 120);
   await page.waitForTimeout(50);
   report.timings.large200Pan = Math.round(performance.now() - pan);
-  assert(await cardsFitCanvas(page), 'large map fits on open');
-  await shot(page, 'flow-large-1440', 'Generated 12-lane, 200-step map fitted on open.');
+  assert(await zoomOf(page) >= 85, 'large map opens readable');
+  await shot(page, 'flow-large-1440', 'Generated 12-lane, 200-step map at its start with the overview.');
 
   for (const [width, height] of [[1024, 768], [390, 844]]) {
     await page.setViewportSize({ width, height });
     await open(page, 'lending');
     assert(await noPageOverflow(page), `no horizontal page scroll at ${width}`);
-    const zoom = Number((await page.locator('.fm-zoom__value').innerText()).replace('%', ''));
-    if (width < 640) assert(zoom >= 60, `a phone opens a long flow at a readable size (${zoom}%)`);
-    else assert(await cardsFitCanvas(page), `the map fits at ${width}`);
+    const zoom = await zoomOf(page);
+    assert(zoom >= 75, `a long flow opens at a readable size at ${width} (${zoom}%)`);
+    assert(await startVisible(page, ['owner_list']), `the start is visible at ${width}`);
     await shot(page, `flow-read-${width}`, `User flow sample at ${width}×${height}.`);
     await selectStep(page, 'reader_deposit');
     await shot(page, `flow-edit-${width}`, `Step editor at ${width}×${height}${width < 640 ? ' as a bottom sheet' : ''}.`);
