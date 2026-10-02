@@ -1,50 +1,19 @@
+#!/usr/bin/env node
+/*
+ * Browser check for drag-to-reparent in the hierarchy editor (`?editor=1`):
+ * single and multi-card drops into another card, drop guidance, descendants
+ * following, no overlap afterwards, and one undo/redo for the whole drop.
+ * Evidence: test-results/reparent-drag/.
+ */
 import fs from 'node:fs/promises';
-import net from 'node:net';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { assert, evidenceDir as makeEvidenceDir, launchBrowser, startServer } from './support/browser-check.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const evidenceDir = path.join(root, 'test-results', 'reparent-drag');
-const mapPath = path.join(evidenceDir, 'map.mmd');
-const viewPath = path.join(evidenceDir, 'map.view.json');
+let evidenceDir;
+let mapPath;
+let viewPath;
 let server;
 let browser;
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
-async function freePort() {
-  return new Promise((resolve, reject) => {
-    const socket = net.createServer();
-    socket.once('error', reject);
-    socket.listen(0, '127.0.0.1', () => {
-      const { port } = socket.address();
-      socket.close(() => resolve(port));
-    });
-  });
-}
-
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundledPath = chromium.executablePath();
-  const match = bundledPath.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundledPath;
-  const candidate = path.join(
-    match[1],
-    `chromium_headless_shell-${match[2]}`,
-    'chrome-headless-shell-mac-arm64',
-    'chrome-headless-shell',
-  );
-  try {
-    await fs.access(candidate);
-    return candidate;
-  } catch {
-    return bundledPath;
-  }
-}
 
 async function waitUntil(check, message, timeoutMs = 6000) {
   const deadline = Date.now() + timeoutMs;
@@ -157,8 +126,9 @@ async function visibleOverlapPairs(page) {
 }
 
 async function run() {
-  await fs.rm(evidenceDir, { recursive: true, force: true });
-  await fs.mkdir(evidenceDir, { recursive: true });
+  evidenceDir = await makeEvidenceDir('reparent-drag');
+  mapPath = path.join(evidenceDir, 'map.mmd');
+  viewPath = path.join(evidenceDir, 'map.view.json');
   await fs.writeFile(mapPath, fixtureSource(), 'utf8');
   await fs.writeFile(viewPath, `${JSON.stringify({
     positions: initialPositions,
@@ -166,22 +136,9 @@ async function run() {
     viewport: { x: 30, y: 20, zoom: 0.78 },
   }, null, 2)}\n`, 'utf8');
 
-  const port = await freePort();
-  const origin = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, ['server/index.mjs'], {
-    cwd: root,
-    env: {
-      ...process.env,
-      FINAL_SHAPE_MAP_PORT: String(port),
-      FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir,
-      FINAL_SHAPE_MAP_PATH: path.basename(mapPath),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await waitUntil(async () => (await fetch(`${origin}/api/health`).catch(() => null))?.ok,
-    'Isolated map server did not start.');
-
-  browser = await chromium.launch({ executablePath: await headlessShellPath(), headless: true });
+  server = await startServer({ FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir, FINAL_SHAPE_MAP_PATH: path.basename(mapPath) });
+  const { origin } = server;
+  browser = await launchBrowser();
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   const page = await context.newPage();
@@ -267,5 +224,5 @@ try {
   await run();
 } finally {
   await browser?.close().catch(() => {});
-  server?.kill('SIGTERM');
+  await server?.stop().catch(() => {});
 }

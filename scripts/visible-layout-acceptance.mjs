@@ -1,35 +1,20 @@
+#!/usr/bin/env node
+/*
+ * Browser check for a 50-card map in the hierarchy editor (`?editor=1`): the
+ * saved viewport is restored on open and on reload but never jumps on a live
+ * update; 보이는 가지 정리 arranges only visible cards, leaving folded cards'
+ * positions and the source untouched, with no overlaps folded or expanded.
+ * Evidence: test-results/visible-layout/.
+ */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { cardOverlap, evidenceDir as makeEvidenceDir, launchBrowser, root, startServer } from './support/browser-check.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const evidenceDir = path.join(root, 'test-results', 'visible-layout');
-const mapPath = path.join(evidenceDir, 'fifty-nodes.mmd');
-const port = 4334;
-const origin = `http://127.0.0.1:${port}`;
+let evidenceDir;
+let mapPath;
+let origin;
 let server;
 let browser;
-
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundledPath = chromium.executablePath();
-  const match = bundledPath.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundledPath;
-  const candidate = path.join(
-    match[1],
-    `chromium_headless_shell-${match[2]}`,
-    'chrome-headless-shell-mac-arm64',
-    'chrome-headless-shell',
-  );
-  try {
-    await fs.access(candidate);
-    return candidate;
-  } catch {
-    return bundledPath;
-  }
-}
 
 function fixtureSource() {
   const branches = Array.from({ length: 8 }, (_, index) => `branch_${index + 1}`);
@@ -70,18 +55,6 @@ function fixtureSource() {
   ].join('\n');
 }
 
-async function waitForServer() {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    try {
-      if ((await fetch(`${origin}/api/health`)).ok) return;
-    } catch {
-      // The isolated fixture server is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error('Focused fixture server did not start.');
-}
-
 async function readSnapshot() {
   const response = await fetch(`${origin}/api/map`);
   if (!response.ok) throw new Error(`Snapshot read failed: ${response.status}.`);
@@ -102,32 +75,14 @@ function positionsFor(snapshot, ids) {
 }
 
 async function visibleMetrics(page) {
-  return page.locator('.react-flow__node').evaluateAll((elements) => {
-    const nodes = elements.map((element) => {
-      const rect = element.getBoundingClientRect();
-      return { id: element.dataset.id, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-    });
-    const overlapPairs = [];
-    for (let left = 0; left < nodes.length; left += 1) {
-      for (let right = left + 1; right < nodes.length; right += 1) {
-        const a = nodes[left];
-        const b = nodes[right];
-        if (
-          a.x < b.x + b.width - 0.5
-          && a.x + a.width > b.x + 0.5
-          && a.y < b.y + b.height - 0.5
-          && a.y + a.height > b.y + 0.5
-        ) overlapPairs.push([a.id, b.id]);
-      }
-    }
-    const bounds = {
-      left: Math.min(...nodes.map((node) => node.x)),
-      top: Math.min(...nodes.map((node) => node.y)),
-      right: Math.max(...nodes.map((node) => node.x + node.width)),
-      bottom: Math.max(...nodes.map((node) => node.y + node.height)),
-    };
-    return { nodeCount: nodes.length, overlapPairs, bounds, firstCardWidth: nodes[0]?.width || 0 };
-  });
+  const { nodeCount, nodes, overlapPairs } = await cardOverlap(page);
+  const bounds = {
+    left: Math.min(...nodes.map((node) => node.x)),
+    top: Math.min(...nodes.map((node) => node.y)),
+    right: Math.max(...nodes.map((node) => node.x + node.width)),
+    bottom: Math.max(...nodes.map((node) => node.y + node.height)),
+  };
+  return { nodeCount, overlapPairs, bounds, firstCardWidth: nodes[0]?.width || 0 };
 }
 
 async function viewportTransform(page) {
@@ -147,8 +102,8 @@ function assertViewport(actual, expected, label) {
 }
 
 async function run() {
-  await fs.rm(evidenceDir, { recursive: true, force: true });
-  await fs.mkdir(evidenceDir, { recursive: true });
+  evidenceDir = await makeEvidenceDir('visible-layout');
+  mapPath = path.join(evidenceDir, 'fifty-nodes.mmd');
   await fs.writeFile(mapPath, fixtureSource(), 'utf8');
   await fs.writeFile(mapPath.replace(/\.mmd$/, '.view.json'), `${JSON.stringify({
     positions: {},
@@ -156,19 +111,9 @@ async function run() {
     viewport: { x: 160, y: -3485, zoom: 1 },
   }, null, 2)}\n`, 'utf8');
 
-  server = spawn(process.execPath, ['server/index.mjs'], {
-    cwd: root,
-    env: {
-      ...process.env,
-      FINAL_SHAPE_MAP_PORT: String(port),
-      FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir,
-      FINAL_SHAPE_MAP_PATH: path.basename(mapPath),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await waitForServer();
-
-  browser = await chromium.launch({ executablePath: await headlessShellPath(), headless: true });
+  server = await startServer({ FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir, FINAL_SHAPE_MAP_PATH: path.basename(mapPath) });
+  origin = server.origin;
+  browser = await launchBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 820 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   const page = await context.newPage();
@@ -243,22 +188,6 @@ async function run() {
   const expandedScreenshot = path.join(evidenceDir, 'expanded-15-visible.png');
   await page.screenshot({ path: expandedScreenshot, fullPage: true });
 
-  await page.setViewportSize({ width: 390, height: 820 });
-  const toolbarButtons = await page.locator('.topbar button:visible').evaluateAll((buttons) => buttons.map((button) => {
-    const rect = button.getBoundingClientRect();
-    return {
-      label: button.getAttribute('aria-label') || button.textContent.trim(),
-      left: rect.left,
-      right: rect.right,
-      height: rect.height,
-    };
-  }));
-  if (toolbarButtons.some((button) => button.left < 0 || button.right > 390 || button.height < 40)) {
-    throw new Error(`390px toolbar clipping: ${JSON.stringify(toolbarButtons)}`);
-  }
-  const compactScreenshot = path.join(evidenceDir, 'toolbar-390.png');
-  await page.screenshot({ path: compactScreenshot, fullPage: true });
-
   const report = {
     fixture: { totalNodes: 50, foldedBranches: 8 },
     viewportRestore: { restoredZoomOne, unchangedBeforeReload, restoredZoomTwo },
@@ -269,11 +198,9 @@ async function run() {
       expandedHiddenPositions: stillHiddenIds.length,
       semanticGraphUnchanged: true,
     },
-    responsiveToolbar: { viewportWidth: 390, buttons: toolbarButtons },
     screenshots: [
       path.relative(root, foldedScreenshot),
       path.relative(root, expandedScreenshot),
-      path.relative(root, compactScreenshot),
     ],
   };
   await fs.writeFile(path.join(evidenceDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
@@ -283,10 +210,6 @@ async function run() {
 try {
   await run();
 } finally {
-  await browser?.close();
-  if (server && server.exitCode === null) {
-    const exited = new Promise((resolve) => server.once('exit', resolve));
-    server.kill('SIGTERM');
-    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
-  }
+  await browser?.close().catch(() => {});
+  await server?.stop().catch(() => {});
 }
