@@ -18,10 +18,26 @@ async function request(path, options) {
   return body;
 }
 
-async function snapshot() { return request('/api/map'); }
-async function mutate(operation) {
-  const current = await snapshot();
-  return request('/api/mutations', {
+/**
+ * Every server command works on the configured single map, or with
+ * `--project KEY --map FILE` (or SHAPE_MAP_PROJECT and SHAPE_MAP_MAP) on one
+ * map of a project opened through SHAPE_MAP_WORKSPACE_ROOT, such as a flow map.
+ */
+function mapPath(path, options = {}) {
+  const project = options.project ?? process.env.SHAPE_MAP_PROJECT;
+  const map = options.map ?? process.env.SHAPE_MAP_MAP;
+  if (!project && !map) return path;
+  if (!project || !map) throw new Error('--project and --map go together: --project KEY --map FILE.mmd');
+  return `${path}${path.includes('?') ? '&' : '?'}${new URLSearchParams({ project, map })}`;
+}
+function withMap(command) {
+  return command.option('--project <key>', 'project key from the project list (with --map)')
+    .option('--map <file>', 'map file in the project docs/maps, such as 02-rooms.mmd (with --project)');
+}
+async function snapshot(options) { return request(mapPath('/api/map', options)); }
+async function mutate(operation, options) {
+  const current = await snapshot(options);
+  return request(mapPath('/api/mutations', options), {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ baseRevision: current.revision, clientId, operation }),
   });
@@ -33,29 +49,40 @@ function shapeOption(value) {
 }
 
 program.name('shape-map').description('Read and edit the shared Shape map with revision checks');
-program.command('brief').description('Print the current product discussion for an AI').action(async () => {
-  const { text } = await request('/api/brief'); process.stdout.write(`${text}\n`);
-});
-program.command('comment').arguments('<id> <body>').option('--kind <kind>', 'note, concern, or change', 'note')
+withMap(program.command('brief')).description('Print the discussion request for an AI: changes, proposals, and new memos')
+  .option('--focus <id>', 'one feature, flow step, or lane')
+  .option('--problem <text>').option('--purpose <text>').option('--success <text>', 'success criteria')
+  .option('--approved', 'the person approved this request (needs --problem and --success)')
+  .action(async (options) => {
+    const body = { ...(options.focus ? { focus: options.focus } : {}), problem: options.problem || '', purpose: options.purpose || '',
+      successCriteria: options.success || '', approved: Boolean(options.approved) };
+    const { text } = await request(mapPath('/api/brief', options), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    process.stdout.write(`${text}\n`);
+  });
+withMap(program.command('comment')).arguments('<id> <body>').description('Leave a memo on a feature, flow step, or lane')
+  .option('--kind <kind>', 'note, concern, or change', 'note')
   .option('--author <author>', 'comment author', 'AI')
-  .action(async (id, body, options) => output(await mutate({ type: 'addComment', id, body, kind: options.kind, author: options.author })));
-program.command('propose').arguments('<id>').requiredOption('--reason <text>', 'why this feature should change')
-  .option('--logic <text>', 'how the feature should work')
-  .action(async (id, options) => output(await mutate({ type: 'setProposal', id, proposal: { reason: options.reason, ...(options.logic ? { logic: options.logic } : {}) } })));
-program.command('turn').arguments('<title>').option('--summary <text>', 'what changed and why')
-  .action(async (title, options) => output(await mutate({ type: 'createTurn', title, summary: options.summary })));
-program.command('show').description('Show the current snapshot').action(async () => output(await snapshot()));
-program.command('subtree').arguments('<id>').option('-d, --depth <number>', 'maximum child depth', '2')
-  .action(async (id, options) => output(await request(`/api/subtree/${encodeURIComponent(id)}?depth=${encodeURIComponent(options.depth)}`)));
-program.command('add').arguments('<parentId> <label>')
+  .action(async (id, body, options) => output(await mutate({ type: 'addComment', id, body, kind: options.kind, author: options.author }, options)));
+withMap(program.command('propose')).arguments('<id>').description('Save the next change for a feature or flow step')
+  .requiredOption('--reason <text>', 'the problem: why this should change')
+  .option('--logic <text>', 'the desired change').option('--purpose <text>').option('--success <text>', 'success criteria')
+  .action(async (id, options) => output(await mutate({ type: 'setProposal', id, proposal: { reason: options.reason,
+    ...(options.logic ? { logic: options.logic } : {}), ...(options.purpose ? { purpose: options.purpose } : {}),
+    ...(options.success ? { successCriteria: options.success } : {}) } }, options)));
+withMap(program.command('turn')).arguments('<title>').description('Record the current map as a turn').option('--summary <text>', 'what changed and why')
+  .action(async (title, options) => output(await mutate({ type: 'createTurn', title, ...(options.summary ? { summary: options.summary } : {}) }, options)));
+withMap(program.command('show')).description('Show the current snapshot').action(async (options) => output(await snapshot(options)));
+withMap(program.command('subtree')).arguments('<id>').option('-d, --depth <number>', 'maximum child depth', '2')
+  .action(async (id, options) => output(await request(mapPath(`/api/subtree/${encodeURIComponent(id)}?depth=${encodeURIComponent(options.depth)}`, options))));
+withMap(program.command('add')).arguments('<parentId> <label>')
   .option('--id <id>').requiredOption('--category <id>').option('--shape <shape>', 'rectangle or rounded', shapeOption, 'rectangle')
-  .action(async (parentId, label, options) => output(await mutate({ type: 'addNode', parentId, label, id: options.id, shape: options.shape, category: options.category })));
-program.command('rename').arguments('<id> <label>')
-  .action(async (id, label) => output(await mutate({ type: 'renameNode', id, label })));
-program.command('move').arguments('<id> <parentId>')
-  .action(async (id, parentId) => output(await mutate({ type: 'moveNode', id, parentId })));
-program.command('style').arguments('<id>').requiredOption('--shape <shape>', 'rectangle or rounded', shapeOption).requiredOption('--category <id>')
-  .action(async (id, options) => output(await mutate({ type: 'setNodePresentation', id, shape: options.shape, category: options.category })));
+  .action(async (parentId, label, options) => output(await mutate({ type: 'addNode', parentId, label, id: options.id, shape: options.shape, category: options.category }, options)));
+withMap(program.command('rename')).arguments('<id> <label>')
+  .action(async (id, label, options) => output(await mutate({ type: 'renameNode', id, label }, options)));
+withMap(program.command('move')).arguments('<id> <parentId>')
+  .action(async (id, parentId, options) => output(await mutate({ type: 'moveNode', id, parentId }, options)));
+withMap(program.command('style')).arguments('<id>').requiredOption('--shape <shape>', 'rectangle or rounded', shapeOption).requiredOption('--category <id>')
+  .action(async (id, options) => output(await mutate({ type: 'setNodePresentation', id, shape: options.shape, category: options.category }, options)));
 
 /** Map files in one file, a docs/maps folder, or a repository that has one. */
 async function mapFiles(target) {
