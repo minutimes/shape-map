@@ -183,3 +183,106 @@ or size override. `patch.shape.anchors` merges placement relationships by ID;
 and `y: {ids,edge,offset}` (top/bottom), with finite offsets and existing sibling
 references. Cyclic or cross-parent references return `422` without writing.
 Spatial changes preserve the source revision and `.mmd` bytes.
+
+## Projects
+
+Set `SHAPE_MAP_WORKSPACE_ROOT` to a folder that holds product repositories.
+Shape map then opens with a project list instead of a single map. Without it,
+the single-map behavior above is unchanged. Project maps follow
+[the project map contract](FORMAT.md#project-maps).
+
+- `GET /api/projects` returns `{ "workspace": true, "projects": [...] }`, or
+  `{ "workspace": false }` when no workspace root is configured. Each project is
+  `{ "key", "name", "branch", "worktree", "mapCount" }`. Projects are the Git
+  repositories directly inside the workspace root, plus their Git worktrees that
+  are inside the root and contain `docs/maps/*.mmd`. `key` is the project's path
+  relative to the workspace root, with `/` separators.
+- `GET /api/project?project=KEY` returns `{ "project", "maps": [...] }`. Each map
+  is `{ "file", "path", "kind", "title", "description?", "editable", "declaredKind?", "error?", "line?" }`.
+  `kind` is `features`, `journey`, or `other`; `declaredKind` keeps a header kind
+  this version does not know. A map that cannot be edited explains why in
+  `error`, with `line` when one line is at fault.
+- `GET /api/project/events?project=KEY` is an SSE stream of `maps` events carrying
+  that list whenever a map file is added, removed, or renamed, or changes kind,
+  title, or validity.
+
+Every existing route (`/api/map`, `/api/events`, `/api/mutations`, `/api/view`,
+`/api/brief`, `/api/subtree/:id`, `/api/health`, and `/api/repository`) accepts
+`project` and `map` query parameters together; `map` is a file name inside
+`docs/maps/`. Without them, the routes serve the configured single map. Only
+listed projects and maps can be opened. Traversal, other folders, and symlinks
+that resolve outside the project are rejected with 404 `project_not_found` or
+`map_not_found`. For a project map, `/api/repository` reads that project's Git
+history, and `/api/view` keeps canvas state in Shape map's local state directory
+(`SHAPE_MAP_STATE_DIR`, default `.state/` in the Shape map checkout) instead of
+the project.
+
+Snapshots carry `kind`. A `features` snapshot is the v1 snapshot above; its
+`graph.map` holds the header when the source has one. A journey snapshot is:
+
+```json
+{
+  "revision": "sha256-prefix",
+  "updatedAt": "ISO-8601",
+  "origin": "startup|external|<clientId>",
+  "mapPath": "docs/maps/rooms.mmd",
+  "kind": "journey",
+  "editable": true,
+  "source": "flowchart LR\n  %% sm-map: {\"kind\":\"journey\",\"title\":\"방 동선\"}\n  ...",
+  "graph": {
+    "map": { "kind": "journey", "title": "방 동선" },
+    "lanes": [{ "id": "player", "title": "플레이어", "tags": [], "summary": "처음 온 사람이에요." }],
+    "steps": [{ "id": "player_enter", "label": "게임에 들어오기", "shape": "milestone", "lane": "player", "tags": ["plaza"] }],
+    "arrows": [{ "source": "player_enter", "target": "player_quick", "style": "next" }],
+    "tags": [{ "id": "plaza", "label": "광장", "description": "모두가 처음 들어오는 공개 서버", "fill": "#E6EAFB", "stroke": "#3550C8", "textColor": "#1A2A6B", "strokeWidth": 1 }]
+  },
+  "sourceStatus": { "valid": true, "error": null }
+}
+```
+
+`steps` follow canonical declaration order. `shape` is `action`, `milestone`, or
+`decision`. `style` is `next` (`-->`), `alternative` (`-.->`), or `exchange`
+(`==>`). Optional values (`summary`, an arrow `label`, and the map `title` and
+`description`) are absent when empty.
+
+A map that cannot be edited is served with `"editable": false`, its `source`, and
+`sourceStatus: { "valid": false, "error": "...", "line": 12 }`, and `graph: null`
+unless an earlier valid version is still shown. Its `kind` is the declared kind
+when it is known and `other` otherwise. Mutations on it return 422
+`read_only_map`; a map that became invalid after opening keeps the v1 behavior
+and returns `invalid_source`.
+
+### Journey operations
+
+Journey maps use `POST /api/mutations?project=KEY&map=FILE` with
+`{ "baseRevision", "clientId", "operation" }`. Every journey operation needs the
+exact current revision.
+
+| Operation | Fields |
+| --- | --- |
+| `addStep` | `lane` (lane ID, or `null` for a shared step), `label`, optional `id`, `shape`, `tags`, `summary`, `after` or `before` (a step in the same lane), `connectFrom` (also adds `connectFrom --> new`), and `splice` (`{source,target}`: replaces that arrow with source → new → target; the first arrow keeps the old style and label) |
+| `updateStep` | `id`, optional `label`, `shape`, `tags` (the complete list), `summary` (`null` removes) |
+| `moveStep` | `id`, `lane` (`null` for shared), optional `after` or `before`; arrows are unchanged |
+| `deleteSteps` | `ids`, optional `bridge` (default `true`): a deleted step with exactly one incoming and one outgoing arrow is replaced by one arrow from its predecessor to its successor, keeping the incoming style and label, unless that pair is already connected |
+| `addArrow` | `source`, `target`, optional `style` (default `next`) and `label` |
+| `updateArrow` | `source`, `target`, optional `style`, `label` (`null` removes), `newSource`, `newTarget` |
+| `removeArrow` | `source`, `target` |
+| `addLane` | `title`, optional `id`, `after` (lane ID, or `null` to be first), `tags`, `summary`; without `after`, the lane is last |
+| `updateLane` | `id`, optional `title`, `tags`, `summary` (`null` removes) |
+| `moveLane` | `id`, `after` (lane ID, or `null` to be first) |
+| `deleteLane` | `id`, optional `withSteps`; required when the lane has steps, which are then deleted without bridging |
+| `upsertTag` | `tag`: `{ id, label, description, fill, stroke, textColor, strokeWidth }` |
+| `deleteTag` | `id`; removes the tag from every lane and step |
+| `setMapHeader` | optional `title` and `description` (`null` removes) |
+| `replaceSource` | `source`: complete journey text that must parse as a journey map; used by the source editor and by undo and redo |
+
+Generated IDs are the smallest unused `step-N` or `lane-N`. Validation failures
+return 422 `validation_error`; source errors include `details.line`. A stale
+revision returns 409 `revision_conflict` with a fresh snapshot. An operation whose
+canonical result equals the current source skips the write and the SSE event.
+`features` maps in a project use the v1 operations above.
+
+`npm run map -- check PATH` validates one map file or a `docs/maps` folder without
+a running server. It prints each file's kind, title, and first error with its
+line, and exits with status 1 when a file that declares `features` or `journey`
+is not valid.

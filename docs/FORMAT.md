@@ -2,7 +2,9 @@
 
 `maps/*.mmd` is the single authority for graph meaning and node presentation.
 The editor deliberately supports a small Mermaid `flowchart` subset so every visual
-operation has an honest text round trip.
+operation has an honest text round trip. A product repository can keep several
+maps of different kinds; see [Project maps](#project-maps) and
+[Journey maps](#journey-maps).
 
 ## Authoritative syntax
 
@@ -67,6 +69,8 @@ operation has an honest text round trip.
   in task, proposal, or workflow metadata. An empty array deliberately hides all
   five optional features while preserving their data. If the comment is absent,
   readers and writers preserve that absence instead of materializing defaults.
+- Optional map header: one `%% sm-map: JSON` comment whose `kind` is `features`
+  (see [Project maps](#project-maps)). An absent header stays absent.
 - The marker `%% mlc-format: 1` is required.
 
 Product metadata (`sm-block`, `sm-turn`, `sm-link`, and `sm-lens`) is documented
@@ -132,3 +136,156 @@ snapshot and never overwrites the invalid file. A revision mismatch is returned
 as a recoverable conflict, except for the field-guarded content patch described
 in the API contract. That operation compares every field with the latest source
 before it writes; a mismatch is returned as a recoverable field conflict.
+
+## Project maps
+
+A product repository keeps its maps in `docs/maps/` at the repository root.
+Shape map reads every `*.mmd` file directly inside that folder. Subfolders,
+names that start with `.`, and other files such as `README.md` are ignored, so
+the folder can also hold notes for people.
+
+Each map names its kind in one header comment:
+
+```text
+%% sm-map: {"kind":"journey","title":"방과 리그 동선","description":"사람들이 방과 리그를 오가는 길"}
+```
+
+| Field | Rule |
+| --- | --- |
+| `kind` | Required. `features` (기능 계통도) or `journey` (동선 지도). |
+| `title` | Optional, 1–80 characters. The map's name in Shape map. |
+| `description` | Optional, up to 400 characters. One line shown with the title. |
+
+Unknown properties are rejected, and a file has at most one header. The header
+may be on any line; Shape map writes it directly after the declaration lines.
+Without a header, a file in the v1 format above is a `features` map, so existing
+maps remain valid unchanged, and writers preserve the absence. Every other map
+needs a header.
+
+A `features` map follows the v1 hierarchy contract above. A `journey` map follows
+the [journey contract](#journey-maps). The default title is the root label of a
+`features` map and the file name without `.mmd` for a `journey` map.
+
+Shape map shows one tab per kind, in this order: 기능 계통도, 동선 지도, then
+기타 그림. Within a tab, maps are ordered by file name, so a numeric prefix such
+as `01-rooms.mmd` sets their order.
+
+A file that Shape map cannot edit is still listed: another Mermaid diagram type,
+a kind from a later version, or a file with an invalid line. It appears read-only
+in its declared tab, or under 기타 그림, with the reason and the line number.
+Shape map never rewrites such a file. Once the file is fixed, it becomes editable
+without a restart.
+
+Shape map writes only the `.mmd` files that a person edits. Canvas state for
+project maps stays in Shape map's local state directory, never in the project.
+
+## Journey maps
+
+A journey map (동선 지도) shows how each kind of participant moves through a
+product: what they do and in what order, which way they choose, where they hand
+something to another participant, and what they exchange. Participants are not
+only paying customers. A lane can be a consumer, a provider, a data provider, an
+operator, or an automated system.
+
+```mermaid
+flowchart LR
+  %% sm-map: {"kind":"journey","title":"방 동선"}
+  subgraph player["플레이어"]
+    player_enter(["게임에 들어오기"])
+    player_quick["빠른 참가 누르기"]
+    player_choice{"기다리는 방이 있나?"}
+    player_join["방에 들어가기"]
+  end
+  subgraph host["방장"]
+    host_ticket["방 이용권 사기"]
+    host_room["방 만들기"]
+  end
+  subgraph platform["플랫폼"]
+    platform_room["새 방 열기"]
+  end
+
+  player_enter --> player_quick
+  player_quick --> player_choice
+  player_choice -->|"있어요"| player_join
+  player_choice -.->|"없어요"| platform_room
+  host_ticket --> host_room
+  host_ticket ==>|"이용권 결제"| platform_room
+  host_room ==>|"방 코드"| player_join
+
+  classDef plaza fill:#E6EAFB,stroke:#3550C8,color:#1A2A6B,stroke-width:1px
+  classDef room fill:#DCF1EA,stroke:#0B7358,color:#06402F,stroke-width:1px
+  classDef pay fill:#FBE3E6,stroke:#C0263A,color:#7A1020,stroke-width:1px
+  classDef provider fill:#FFF6E8,stroke:#9A5D00,color:#4A2D00,stroke-width:1px
+  class player_enter,player_quick,host_ticket plaza
+  class player_join,host_room,platform_room room
+  class host_ticket pay
+  class host provider
+
+  %% sm-block: player|{"summary":"처음 온 사람이에요. 낯선 사람과 한 판 해요."}
+  %% sm-block: host_ticket|{"summary":"커스텀방은 하루권이에요."}
+
+  %% mlc-legend: plaza|광장|모두가 처음 들어오는 공개 서버
+  %% mlc-legend: room|방|우리가 만드는 예약 서버
+  %% mlc-legend: pay|결제|돈을 내는 단계
+  %% mlc-legend: provider|제공자|다른 사람에게 판을 열어 주는 쪽
+```
+
+### Statements
+
+Each statement is on its own line; blank lines are allowed.
+
+- **Declaration.** Exactly one `flowchart LR` and exactly one `%% sm-map:` header
+  with `"kind":"journey"`.
+- **Lanes (참여자 줄).** `subgraph ID["title"]`, the lane's steps, then `end`. A
+  lane is one kind of participant. Lanes do not nest, and only step declarations
+  may appear inside a lane. Lanes are shown top to bottom in declaration order.
+  A lane may be empty.
+- **Steps.** `ID["label"]` is an action, `ID(["label"])` is a start, an end, or a
+  milestone, and `ID{"label"}` is a decision. A step declared inside a lane
+  belongs to that lane; a step declared outside every lane is shared. Declaration
+  order is the reading order wherever arrows do not already set one.
+- **Arrows.** Declared outside lanes, one per line:
+  - `A --> B`: the next step.
+  - `A -.-> B`: another way, an optional path, or a return.
+  - `A ==> B`: a handoff or exchange between participants, such as money, data,
+    content, or an invitation.
+
+  Any arrow may carry a label, as in `A -->|"label"| B`. Both ends must be
+  declared steps, not lanes, and must differ. At most one arrow joins the same
+  source and target, so that pair identifies the arrow. Arrows keep their
+  declaration order.
+- **Tags (표시).** `classDef NAME fill:#RRGGBB,stroke:#RRGGBB,color:#RRGGBB,stroke-width:Npx`
+  with exactly one `%% mlc-legend: NAME|label|description`. `class ID1,ID2 NAME`
+  puts the tag on steps or lanes. A step or lane can carry several tags, each at
+  most once. Tags describe places, exchanges, sides, or anything else the map
+  needs; Shape map shows them as chips and can highlight them. A tag may be
+  defined without being used.
+- **Descriptions.** `%% sm-block: ID|{"summary":"text"}` on a step or lane. Only
+  `summary` is supported in journey maps.
+
+Every other statement is rejected with its line number. This includes chained
+arrows (`A --> B --> C`), `&`, node declarations inside arrows, `style`,
+`linkStyle`, `click`, `direction`, other node shapes, and other comments.
+
+### Identifiers and text
+
+- IDs match `[A-Za-z][A-Za-z0-9_-]*` and never change during edits. Lanes and
+  steps share one namespace; tag names are separate. Mermaid keywords (`end`,
+  `graph`, `flowchart`, `subgraph`, `class`, `classDef`, `click`, `style`,
+  `linkStyle`, and `direction`, in any letter case) cannot be IDs.
+- Labels, lane titles, and arrow labels are JSON-quoted text on one line. They
+  cannot contain a double quote (`"`), because Mermaid cannot read it; use ‘ ’ or
+  “ ” instead. Step labels have 1–200 characters, lane titles 1–80, arrow labels
+  up to 120, and summaries up to 4,000. Shape map shows all text as plain text.
+- A journey map has at most 50 lanes, 2,000 steps, 4,000 arrows, and 64 tags. A
+  source file is at most 16 MiB.
+
+### Canonical text
+
+Shape map writes journey maps in this order: the declaration and header; each
+lane with its steps; shared steps; arrows; `classDef` lines; one `class` line per
+used tag, listing lanes and then steps in declaration order; summaries for lanes
+and then steps; and legends. It indents with two spaces, and four inside a lane.
+A valid file in another order is accepted as written. The first edit from Shape
+map rewrites it in canonical order without changing its meaning. Invalid journey
+sources follow the same safety boundary as v1 maps: they are never rewritten.
