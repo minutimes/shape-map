@@ -269,9 +269,10 @@ when it is known and `other` otherwise. Mutations on it return 422
 `read_only_map`; a map that became invalid after opening keeps the v1 behavior
 and returns `invalid_source`, with `sourceStatus.line` when one line is at fault.
 A kind this version does not know is also kept as `declaredKind` in the snapshot.
-`/api/brief` and `/api/subtree/:id` serve only `features` maps, and `/api/view`
-keeps canvas state only for `features` maps; other kinds return 422
-`unsupported_map_kind`, and a read-only map returns 422 `read_only_map`.
+`/api/brief` serves `features` maps and flow maps (see below). `/api/subtree/:id`
+serves only `features` maps, and `/api/view` keeps canvas state only for
+`features` maps; other kinds return 422 `unsupported_map_kind`, and a read-only
+map returns 422 `read_only_map`.
 
 ### Flow map operations
 
@@ -282,7 +283,7 @@ exact current revision.
 | Operation | Fields |
 | --- | --- |
 | `addStep` | `lane` (lane ID, or `null` for a shared step), `label`, optional `id`, `shape`, `tags`, `summary`, `after` or `before` (a step in the same lane), `connectFrom` (also adds `connectFrom --> new`), and `splice` (`{source,target}`: replaces that arrow with source → new → target; the first arrow keeps the old style and label) |
-| `updateStep` | `id`, optional `label`, `shape`, `tags` (the complete list), `summary` (`null` removes) |
+| `updateStep` | `id`, optional `label`, `shape`, `tags` (the complete list), `summary` (`null` removes), `features` (the complete list of `{map,id}` links; `null` or `[]` removes) |
 | `moveStep` | `id`, `lane` (`null` for shared), optional `after` or `before`; arrows are unchanged |
 | `deleteSteps` | `ids`, optional `bridge` (default `true`): a deleted step with exactly one incoming and one outgoing arrow is replaced by one arrow from its predecessor to its successor, keeping the incoming style and label, unless that pair is already connected |
 | `addArrow` | `source`, `target`, optional `style` (default `next`) and `label` |
@@ -296,18 +297,57 @@ exact current revision.
 | `deleteTag` | `id`; removes the tag from every lane and step |
 | `setMapHeader` | optional `title` and `description` (`null` removes) |
 | `replaceSource` | `source`: complete text that must parse as a flow map (either flow kind; changing the kind moves the map to the other tab); used by the source editor and by undo and redo |
+| `addComment` | `id` (step), `body`, `kind` (`note`, `concern`, or `change`), `author`; the service adds the comment `id` and `createdAt` |
+| `resolveComment` | `id`, `commentId`, optional `resolved` (default `true`) |
+| `setProposal` | `id`, `proposal` (`{reason?, purpose?, logic?, successCriteria?}`) or `null` to withdraw it |
+| `setBlock` | `id`, `block: { status }`; `verified` records a review with the service's time and the step's current fingerprint, any other status removes the review, and `neutral` removes the status |
+| `createTurn` | `title`, optional `summary`; the service adds the turn `id`, `number`, `createdAt`, the current `revision`, and the snapshot |
 
 Generated IDs are the smallest unused `step-N` or `lane-N`. Validation failures
 return 422 `validation_error`; source errors include `details.line`. A stale
 revision returns 409 `revision_conflict` with a fresh snapshot. An operation whose
 canonical result equals the current source skips the write and the SSE event.
 `replaceSource` writes its text as given once it parses and passes Mermaid
-validation, so undo can restore a file exactly; it is not reordered.
+validation, so undo can restore a file exactly; it is not reordered. It must keep
+the recorded turns exactly, and it may contain only reviews and memos that the
+service has already read in a valid version of that map; otherwise it returns 422
+`validation_error`. Undo can therefore restore a memo or review, but a replaced
+source cannot invent, edit, or remove a turn, or forge a memo or review.
+Every other flow operation drops the review of a step whose fingerprint changed
+(see [Flow collaboration](FORMAT.md#flow-collaboration)).
 `features` maps in a project use the v1 operations above, plus `setMapHeader`
 with the same optional `title` and `description` fields (`null` or empty text
 removes one). A features map without a header gains `{"kind":"features",...}`
 only when it gets a title or description; a header that exists is kept, even
 when both are removed. Unknown fields, such as `kind`, are rejected.
+
+### Flow discussion and feature links
+
+`GET /api/brief` and `POST /api/brief` accept a flow map as well. `focus` is then a
+step ID, and an unknown step returns 422. The request fields and approval rules are
+the same as for features maps. The text names the canonical file and revision,
+then only the steps that changed since the last turn (with the changed parts),
+were added, carry a proposal that changed, or have new unresolved memos, at most
+12 of them, plus removed step IDs. A focused brief always includes that step, its
+neighbors, description, proposal, and unresolved memos. Each listed step names its
+linked features as `docs/maps/FILE [ID] label`, or 찾을 수 없는 기능 when the
+feature no longer exists. It never copies the whole map.
+
+`GET /api/project/links?project=KEY` returns the explicit links between flow steps
+and features in that project, read from the files:
+
+```json
+{
+  "features": [{ "file": "01-features.mmd", "title": "동네 책장 기능", "nodes": [{ "id": "search", "label": "검색", "parentId": "find" }] }],
+  "flows": [{ "file": "02-lending.mmd", "title": "책 빌리고 빌려주기", "kind": "user-flow",
+    "steps": [{ "id": "reader_search", "label": "읽고 싶은 책 찾기", "features": [{ "map": "01-features.mmd", "id": "search" }] }] }]
+}
+```
+
+`features` lists every editable features map with its features (`section` is
+present for reference sections); `flows` lists only flow maps with linked steps.
+The browser opens a feature with `?project=KEY&map=FILE&open=FEATURE_ID` and a
+flow step with `?project=KEY&map=FILE&step=STEP_ID`; each is read once on opening.
 
 `npm run map -- check PATH` validates one map file or a `docs/maps` folder without
 a running server. It prints each file's kind, title, and first error with its
