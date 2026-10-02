@@ -307,9 +307,15 @@ Each statement is on its own line; blank lines are allowed.
   once. Tags describe places, exchanges, sides, or anything else the map needs;
   Shape map shows them as chips and can highlight them. A tag may be defined
   without being used.
-- **Descriptions.** `%% sm-block: ID|{"summary":"text"}` on a step or lane. Only
-  `summary` is supported in flow maps. A note about a step belongs here rather
-  than in a separate note box.
+- **Descriptions and records.** `%% sm-block: ID|JSON` on a step or lane. A lane
+  block has only `summary`. A step block may have `summary`, then the
+  collaboration records described in [Flow collaboration](#flow-collaboration):
+  `features`, `status`, `review`, and `comments`, written in that order. A note
+  about a step belongs in its `summary` rather than in a separate note box.
+- **Proposals.** `%% mlc-proposal: STEP_ID|JSON`, at most one per step and never
+  on a lane. See [Flow collaboration](#flow-collaboration).
+- **Turns.** `%% sm-turn: JSON`, one line per recorded turn, numbered from 1 in
+  source order. See [Flow collaboration](#flow-collaboration).
 
 Every other statement is rejected with its line number. This includes `&`, node
 declarations inside arrows, links without an arrowhead (`---`, `-.-`), `style`,
@@ -333,10 +339,40 @@ declarations inside arrows, links without an arrowhead (`---`, `-.-`), `style`,
 Shape map writes flow maps in this order: the declaration and header; each lane
 with its direction, if any, and its steps; shared steps; arrows, one per line;
 `classDef` lines; one `class` line per used tag, listing lanes and then steps in
-declaration order; summaries for lanes and then steps; and legends. It indents
+declaration order; `sm-block` lines for lanes and then steps; `mlc-proposal`
+lines in step order; legends; and `sm-turn` lines in turn order. It indents
 with two spaces, and four inside a lane. A valid file in another form, such as
 chained arrows, arrows inside a lane, or a tag split over several `class` lines,
 is accepted as written. The first edit from Shape map rewrites it in canonical
 form without changing its meaning. `npm run map -- format PATH` does that rewrite
 ahead of time, so later edits change only the lines people change. Invalid flow sources follow the same safety
-boundary as v1 maps: they are never rewritten.
+boundary as v1 maps: they are never rewritten. A file without collaboration
+records is written exactly as before: absent records stay absent.
+
+### Flow collaboration
+
+Flow steps carry the same collaboration records as features, in the same
+vocabulary as [the Shape map contract](SHAPE-MAP.md). All of them are optional
+and live in the flow file itself.
+
+```text
+  %% sm-block: reader_search|{"summary":"제목이나 저자로 찾아요.","features":[{"map":"01-features.mmd","id":"search"}],"status":"verified","review":{"at":"2026-10-02T09:00:00.000Z","fingerprint":"<SHA-256>"},"comments":[{"id":"…","body":"결과가 너무 많아요","kind":"concern","author":"사람","createdAt":"2026-10-02T09:01:00.000Z"}]}
+
+  %% mlc-proposal: reader_wait|{"reason":"입고 알림이 늦어요","purpose":"기다리지 않게","logic":"들어오면 바로 알려요","successCriteria":"한 시간 안에 알림이 와요"}
+
+  %% sm-turn: {"id":"…","number":1,"title":"처음 기록","createdAt":"…","revision":"…","lanes":[…],"steps":[…],"arrows":[…],"tags":[…]}
+```
+
+| Record | Rule |
+| --- | --- |
+| `features` | 1–50 explicit links `{ "map", "id" }` to features of the same project. `map` is a file name in `docs/maps/` such as `01-features.mmd`; `id` is a feature ID. Each link appears once. Links are never inferred. A link whose map or feature no longer exists stays valid and is shown as 찾을 수 없는 기능. To remove all links, remove the field. |
+| `status` | `neutral`, `planned`, `verified`, or `concern`, as for features. Shape map writes `verified` with a review and removes the field otherwise; an explicit value in the file is kept. |
+| `review` | `{ "at", "fingerprint" }`: when a person confirmed the step, and the SHA-256 fingerprint of its content then. |
+| `comments` | Up to 1,000 memos `{ id, body, kind, author, createdAt, resolved? }`; `kind` is `note`, `concern`, or `change`. |
+| `mlc-proposal` | The next change for the step: optional `reason` (problem), `purpose`, `logic` (desired change), and `successCriteria`, each up to 4,000 characters. `{}` is kept. Other proposal fields of features maps are rejected. |
+| `sm-turn` | A recorded turn: `id`, consecutive `number`, `title` (up to 200 characters), optional `summary`, `createdAt`, source `revision`, and a snapshot of `lanes`, `steps`, `arrows`, and `tags` (steps keep their records). At most 100 turns and 1 MiB per turn. |
+
+A step's fingerprint covers its label, shape, lane, tags, summary, proposal,
+feature links, and the arrows that start or end at it. Memos and review markers
+do not count. A step block line is at most 1 MiB. Unknown fields and records on
+lanes are rejected with their line number.

@@ -184,9 +184,8 @@ describe('project map routes', () => {
     expect(unchanged).toMatchObject({ revision: undone.revision, origin: 'flow' });
     expect((await request(app).post(`/api/mutations?${q('02-lending.mmd')}`).send({ baseRevision: undone.revision, clientId: 'flow',
       operation: { type: 'renameNode', id: 'reader_open', label: 'x' } }).expect(422)).body.code).toBe('validation_error');
-    for (const route of [`/api/brief?${q('02-lending.mmd')}`, `/api/subtree/reader?${q('02-lending.mmd')}`]) {
-      expect((await request(app).get(route).expect(422)).body.code).toBe('unsupported_map_kind');
-    }
+    expect((await request(app).get(`/api/subtree/reader?${q('02-lending.mmd')}`).expect(422)).body.code).toBe('unsupported_map_kind');
+    expect((await request(app).get(`/api/brief?${q('02-lending.mmd')}`).expect(200)).body.text).toContain('docs/maps/02-lending.mmd');
     expect((await request(app).put(`/api/view?${q('02-lending.mmd')}`).send({ baseRevision: undone.revision, clientId: 'flow', patch: {} }).expect(422)).body.code).toBe('unsupported_map_kind');
     expect((await request(app).get(`/api/repository?${q('02-lending.mmd')}`).expect(200)).body.connected).toBe(true);
   });
@@ -308,5 +307,66 @@ describe('live project updates', () => {
       controller.abort();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+describe('flow collaboration routes', () => {
+  let sample;
+  beforeEach(async () => { sample = await setup(); });
+  const mutate = async (revision, operation, status = 200) => (await request(app).post(`/api/mutations?${q('02-lending.mmd')}`)
+    .send({ baseRevision: revision, clientId: 'flow', operation }).expect(status)).body;
+
+  it('writes memos, review, and turns with server values into the flow file only', async () => {
+    let snapshot = (await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body;
+    snapshot = await mutate(snapshot.revision, { type: 'addComment', id: 'reader_search', body: '검색 결과가 너무 많아요', kind: 'concern', author: '사람' });
+    const [comment] = snapshot.graph.steps.find((step) => step.id === 'reader_search').comments;
+    expect(comment).toMatchObject({ id: expect.stringMatching(/^[0-9a-f-]{36}$/), createdAt: expect.any(String), author: '사람' });
+    snapshot = await mutate(snapshot.revision, { type: 'setBlock', id: 'reader_open', block: { status: 'verified' } });
+    expect(snapshot.graph.steps.find((step) => step.id === 'reader_open').review).toMatchObject({ fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    const revision = snapshot.revision;
+    snapshot = await mutate(snapshot.revision, { type: 'createTurn', title: '처음 기록' });
+    expect(snapshot.graph.turns[0]).toMatchObject({ number: 1, title: '처음 기록', revision, id: expect.any(String) });
+    const file = await fs.readFile(path.join(sample, 'docs/maps/02-lending.mmd'), 'utf8');
+    expect(file).toBe(snapshot.source);
+    expect(file).toMatch(/\n {2}%% sm-turn: \{"id":/);
+    expect(git(sample, 'status', '--porcelain', '--untracked-files=no').trim()).toBe('M docs/maps/02-lending.mmd');
+  });
+
+  it('keeps turns immutable and never lets a replaced source invent a memo or review', async () => {
+    let snapshot = (await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body;
+    const original = snapshot.source;
+    snapshot = await mutate(snapshot.revision, { type: 'addComment', id: 'reader_open', body: '좋아요', kind: 'note', author: '사람' });
+    const withComment = snapshot.source;
+    // Undo and redo restore a memo the store has already read.
+    snapshot = await mutate(snapshot.revision, { type: 'replaceSource', source: original });
+    snapshot = await mutate(snapshot.revision, { type: 'replaceSource', source: withComment });
+    const forged = withComment.replace('"body":"좋아요"', '"body":"다른 사람이 쓴 척"');
+    expect((await mutate(snapshot.revision, { type: 'replaceSource', source: forged }, 422)).message).toMatch(/review and memo records cannot be written/);
+    const reviewed = original.replace('  %% sm-block: catalog|', `  %% sm-block: reader_open|{"status":"verified","review":{"at":"2026-01-01T00:00:00.000Z","fingerprint":"${'a'.repeat(64)}"}}\n  %% sm-block: catalog|`);
+    expect((await mutate(snapshot.revision, { type: 'replaceSource', source: reviewed }, 422)).message).toMatch(/review and memo records/);
+    snapshot = await mutate(snapshot.revision, { type: 'createTurn', title: '첫 턴' });
+    const turnLine = snapshot.source.split('\n').find((line) => line.includes('sm-turn'));
+    expect((await mutate(snapshot.revision, { type: 'replaceSource', source: withComment }, 422)).message).toMatch(/Recorded turns cannot be changed/);
+    expect((await mutate(snapshot.revision, { type: 'replaceSource', source: snapshot.source.replace(turnLine, turnLine.replace('첫 턴', '고친 턴')) }, 422)).message).toMatch(/Recorded turns/);
+    const invented = turnLine.replace('"number":1', '"number":2').replace(/"id":"[^"]+"/, '"id":"made-up"');
+    expect((await mutate(snapshot.revision, { type: 'replaceSource', source: `${snapshot.source}${invented}\n` }, 422)).message).toMatch(/Recorded turns/);
+    // An ordinary edit through the source editor still works and keeps the turn.
+    const renamed = await mutate(snapshot.revision, { type: 'replaceSource', source: snapshot.source.replace('["앱 열기"]', '["앱 켜기"]') });
+    expect(renamed.graph.turns).toEqual(snapshot.graph.turns);
+  });
+
+  it('lists explicit feature links both ways and names linked features in the flow brief', async () => {
+    const snapshot = (await request(app).get(`/api/map?${q('02-lending.mmd')}`).expect(200)).body;
+    await mutate(snapshot.revision, { type: 'updateStep', id: 'reader_search', features: [{ map: '01-features.mmd', id: 'search' }, { map: '01-features.mmd', id: 'retired' }] });
+    const links = (await request(app).get('/api/project/links?project=sample').expect(200)).body;
+    expect(links.features).toEqual([expect.objectContaining({ file: '01-features.mmd', title: '동네 책장 기능', nodes: expect.arrayContaining([{ id: 'search', label: '검색', parentId: 'find' }]) })]);
+    expect(links.flows).toEqual([{ file: '02-lending.mmd', title: '책 빌리고 빌려주기', kind: 'user-flow',
+      steps: [{ id: 'reader_search', label: '읽고 싶은 책 찾기', features: [{ map: '01-features.mmd', id: 'search' }, { map: '01-features.mmd', id: 'retired' }] }] }]);
+    const brief = (await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ focus: 'reader_search', problem: '못 찾아요', successCriteria: '찾는다' }).expect(200)).body;
+    expect(brief.text).toContain('docs/maps/01-features.mmd [search] 검색');
+    expect(brief.text).toContain('docs/maps/01-features.mmd [retired] (찾을 수 없는 기능)');
+    expect((await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ focus: 'nope' }).expect(422)).body.message).toMatch(/step does not exist/);
+    expect((await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ approved: true }).expect(422)).body.message).toMatch(/approved request/);
+    expect((await request(app).get('/api/project/links?project=../x').expect(404)).body.code).toBe('project_not_found');
   });
 });

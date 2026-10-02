@@ -114,7 +114,7 @@ function ZoomControls({ canvasRef, onFit, overview, onToggleOverview }) {
   </div>;
 }
 
-export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane }) {
+export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, stepStates, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane }) {
   const canvasRef = useRef(null);
   const flow = useReactFlow();
   const fitted = useRef(false);
@@ -138,7 +138,7 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
       id: card.id, type: 'step', position: { x: card.x, y: card.y }, width: card.width, height: card.height,
       selected: card.id === selectedStep, draggable: false, connectable: editable, ariaLabel: `${card.step.label} 단계`,
       data: { step: card.step, card, point: FLOW_METRICS.decisionPoint, editable, columns, emphasis: emphasis?.steps.get(card.id) ?? null,
-        tags: (card.step.tags || []).map((id) => tagsById.get(id)).filter(Boolean), onAddNext },
+        tags: (card.step.tags || []).map((id) => tagsById.get(id)).filter(Boolean), onAddNext, state: stepStates?.get(card.id) ?? null },
     }));
     if (editable) for (const band of layout.bands) if (!band.stepCount) {
       const first = layout.ranks[0]?.start ?? 40;
@@ -147,7 +147,7 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
         data: { laneId: band.laneId, text: '첫 단계 추가', onAdd: onAddInLane } });
     }
     return result;
-  }, [layout, selectedStep, editable, emphasis, tagsById, onAddNext, onAddInLane, columns]);
+  }, [layout, selectedStep, editable, emphasis, tagsById, onAddNext, onAddInLane, columns, stepStates]);
 
   const labelOf = useMemo(() => new Map(graph.steps.map((step) => [step.id, step.label])), [graph.steps]);
   const edges = useMemo(() => layout.arrows.map((arrow) => ({

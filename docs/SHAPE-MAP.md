@@ -298,5 +298,26 @@ saved or discarded. A change on disk appears live and keeps the selection when
 the element still exists. A file that breaks after opening pauses editing with a
 notice until it is fixed.
 
-Flow maps do not yet have comments, proposals, review colors, or turns. Cards
-cannot be placed by hand, and flow steps are not yet linked to features.
+### Flow collaboration
+
+Selecting a step shows its color and four tabs: 내용, 메모, 수정안, and 기능.
+People can leave memos (의견, 걱정되는 점, 개선 의견), write a proposal for the next
+change with its problem, purpose, desired change, and success criteria, and
+confirm that they checked the step themselves (직접 확인했어요). The map header
+records a turn (턴) and opens **AI와 논의**; a step's **AI에 전달** focuses the
+request on that step. These work exactly as for features: cards and the legend
+use the same four derived colors with the same meaning and priority (see
+[Derived colors](#derived-colors)); review is only an explicit confirmation and
+is dropped when the step's content changes; turns are real saved snapshots and
+cannot be changed; blue appears only between two recorded turns. Memos, review,
+and proposals join the undo history like other edits; recording a turn starts a
+new history, because no earlier version holds that turn. The records are stored
+in the flow file (see [Flow collaboration](FORMAT.md#flow-collaboration)).
+
+A step can link to features of the project's 기능 계통도 maps, chosen from a list.
+Each link opens that feature in the 기능 계통도 tab, and a feature's editor lists
+the flow steps that link to it and opens them. Links are explicit: they are
+stored in the flow file and never inferred. A link whose feature was removed or
+renamed stays in the file and is shown as 찾을 수 없는 기능.
+
+Cards cannot yet be placed by hand.

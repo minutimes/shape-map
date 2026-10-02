@@ -167,6 +167,12 @@ open project and map, so links and back/forward work. Check maps without the
 app using `npm run map -- check path/to/docs/maps`, and rewrite them once in the
 canonical form Shape map writes using `npm run map -- format path/to/docs/maps`.
 
+User flows and system flows have the same collaboration as features: memos,
+proposals, human review, recorded turns, the four colors, and **AI와 논의** /
+**AI에 전달**. A flow step can link to features of the project's 기능 계통도;
+each link opens the feature, and a feature lists the steps that use it. Links are
+stored in the flow file, never inferred.
+
 ## Development
 
 ```sh

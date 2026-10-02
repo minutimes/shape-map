@@ -24,26 +24,43 @@ export function TagChip({ tag, small = false }) {
   </span>;
 }
 
+const STATE_SHORT = { planned: '수정 대상', concern: '검토 필요', verified: '검수 완료', changed: '직전 개선' };
+
+/** Derived color, memo count, and feature-link count, sitting on the card's top edge. */
+function StepMarks({ step, state }) {
+  const status = state?.status && state.status !== 'neutral' ? state.status : null;
+  const memos = state?.unresolvedCount || 0;
+  const links = step.features?.length || 0;
+  if (!status && !memos && !links) return null;
+  return <span className="fm-step__marks" aria-hidden="true">
+    {status && <span className={`fm-mark fm-mark--${status}`}><i />{STATE_SHORT[status]}</span>}
+    {memos > 0 && <span className="fm-mark" title={`풀리지 않은 메모 ${memos}개`}><FlowIcon name="comment" size={10} />{memos}</span>}
+    {links > 0 && <span className="fm-mark" title={`연결된 기능 ${links}개`}><FlowIcon name="link" size={10} />{links}</span>}
+  </span>;
+}
+
 export const StepCard = memo(function StepCard({ data, selected }) {
-  const { step, card, tags, emphasis, editable, point, columns } = data;
+  const { step, card, tags, emphasis, editable, point, columns, state } = data;
   const visible = tags.slice(0, 2);
   const dashed = tags.find((tag) => tag.strokeDasharray);
   const outline = shapePath(step.shape, card.width, card.height, point);
-  return <div className={`fm-step fm-step--${step.shape}${selected ? ' is-selected' : ''}${emphasis ? ` is-${emphasis}` : ''}${dashed ? ' is-dashed' : ''}${columns ? ' is-columns' : ''}`}
-    data-step-id={step.id} data-testid={`fm-step-${step.id}`} style={{ width: card.width, height: card.height }}>
+  const status = state?.status && state.status !== 'neutral' ? state.status : null;
+  return <div className={`fm-step fm-step--${step.shape}${selected ? ' is-selected' : ''}${emphasis ? ` is-${emphasis}` : ''}${dashed ? ' is-dashed' : ''}${columns ? ' is-columns' : ''}${status ? ` is-state-${status}` : ''}`}
+    data-step-id={step.id} data-testid={`fm-step-${step.id}`} data-state={status || undefined} style={{ width: card.width, height: card.height }}>
     <svg className="fm-step__shape" width={card.width} height={card.height} aria-hidden="true">
       <path className="fm-step__halo" d={outline} />
       <path className="fm-step__outline" d={outline} style={dashed ? { strokeDasharray: dashed.strokeDasharray } : undefined} />
     </svg>
     <Handle type="target" position={columns ? Position.Top : Position.Left} id="in" className="fm-handle fm-handle--in" isConnectable={editable} />
     <div className="fm-step__body">
-      <span className="fm-sr-only">{SHAPE_NAME[step.shape]}: </span>
+      <span className="fm-sr-only">{SHAPE_NAME[step.shape]}{status ? `, ${STATE_SHORT[status]}` : ''}: </span>
       <span className="fm-step__label" style={{ WebkitLineClamp: card.lines }} title={step.label}>{step.label}</span>
       {card.noteLines > 0 && <span className="fm-step__summary" style={{ WebkitLineClamp: card.noteLines }} title={step.summary}>{firstLine(step.summary)}</span>}
       {tags.length > 0 && <span className="fm-step__tags">{visible.map((tag) => <TagChip key={tag.id} tag={tag} small />)}
         {tags.length > visible.length && <span className="fm-chip fm-chip--small fm-chip--more" title={tags.slice(2).map((tag) => tag.label).join(', ')}>+{tags.length - visible.length}</span>}</span>}
     </div>
     {step.summary && !card.noteLines && <span className="fm-step__note" title={step.summary} aria-label="설명 있음" />}
+    <StepMarks step={step} state={state} />
     <Handle type="source" position={columns ? Position.Bottom : Position.Right} id="out" className="fm-handle fm-handle--out" isConnectable={editable} title="끌어서 다른 단계와 잇기" />
     {selected && editable && <button type="button" className="fm-step__next nodrag nopan" aria-label={`${step.label} 다음 단계 추가`} title="다음 단계 추가"
       onClick={(event) => { event.stopPropagation(); data.onAddNext(step.id); }}><FlowIcon name="plus" size={13} /></button>}

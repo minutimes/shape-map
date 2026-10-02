@@ -64,6 +64,12 @@ export function josa(word, withFinal, withoutFinal) {
 
 // Server messages (English) mapped to short Korean reasons. Lane wording follows the map kind.
 const LINE_REASONS = [
+  [/Recorded turns cannot/, '기록한 턴은 원문에서 바꾸거나 지울 수 없어요.'],
+  [/review and memo records cannot/, '메모와 검수 기록은 원문에서 새로 쓰거나 고칠 수 없어요.'],
+  [/\b[Tt]urns? /, '턴 기록 줄의 형식이 맞지 않아요.'],
+  [/feature link|features must|link at most/, '연결된 기능을 적은 형식이 맞지 않아요.'],
+  [/proposal/, '수정안 줄의 형식이 맞지 않아요.'],
+  [/[Bb]lock comment|comment ID|comments must|review needs|review field|invalid status|too many memos/, '메모나 검수 기록의 형식이 맞지 않아요.'],
   [/missing its legend/, '표시의 이름과 설명이 빠져 있어요.'],
   [/legend .* is missing its classDef/, '설명만 있고 표시는 없어요.'],
   [/need an arrowhead/, '연결선에 화살표가 없어요.'],
@@ -92,7 +98,7 @@ const LINE_REASONS = [
   [/instead of &/, '연결선 하나에 여러 단계를 묶었어요.'],
   [/unsupported arrow/, '읽을 수 없는 화살표예요. -->, -.->, ==> 중 하나를 써 주세요.'],
   [/JSON-quoted/, '글을 큰따옴표로 바르게 감싸지 않았어요.'],
-  [/descriptions support only summary|description must be a JSON|duplicate description/, '단계 설명 줄의 형식이 맞지 않아요.'],
+  [/descriptions support only summary|step blocks support|description must be a JSON|duplicate description|needs a summary/, '단계 설명 줄의 형식이 맞지 않아요.'],
   [/invalid .*color|stroke width|cannot contain \| or a newline|undefined tag|Tag does not exist|classDef/, '표시를 정한 줄이 맞지 않아요.'],
   [/flowchart (LR|declaration)|one flowchart/, '첫 줄에 flowchart LR, TB, TD 중 하나가 있어야 해요.'],
   [/map header|map kind|Map title|Map description|sm-map/, '지도 종류를 적은 첫머리 줄이 맞지 않아요.'],

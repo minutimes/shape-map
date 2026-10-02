@@ -8,7 +8,9 @@ import {
 } from './flowEditing.js';
 import { layoutFlow } from './flowLayout.js';
 import FlowCanvas, { viewportKey } from './FlowCanvas.jsx';
-import { ArrowPanel, LanePanel, MapPanel, StepPanel, TagsPanel } from './FlowPanels.jsx';
+import { ArrowPanel, LanePanel, MapPanel, PanelHeader, StepPanel, TagsPanel } from './FlowPanels.jsx';
+import { BriefPanel, StateLegend, TurnsPanel } from './FlowCollab.jsx';
+import { flowStepStates } from '../../lib/flowState.mjs';
 import FlowSourcePanel from './FlowSourcePanel.jsx';
 import { TagChip } from './FlowElements.jsx';
 import FlowIcon from './FlowIcon.jsx';
@@ -61,6 +63,12 @@ function FlowStudio({ api, map }) {
   const [history, setHistory] = useState({ undo: [], redo: [] });
   const [revealId, setRevealId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [stepTab, setStepTab] = useState('content');
+  const [briefFocus, setBriefFocus] = useState(null);
+  const [links, setLinks] = useState({ status: 'idle', data: null });
+  const linksRequest = useRef(null);
+  // A link from another map (?step=ID) opens that step once the map is read.
+  const initialStep = useRef(new URLSearchParams(window.location.search).get('step'));
   const snapshotRef = useRef(null);
   const drafts = useMemo(() => createDraftStore(), []);
   useSyncExternalStore(drafts.subscribe, drafts.version, drafts.version);
@@ -104,13 +112,25 @@ function FlowStudio({ api, map }) {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  const loadLinks = useCallback(async (force = false) => {
+    if (!api.readLinks) return;
+    if (linksRequest.current && !force) return;
+    const request = api.readLinks().then((data) => setLinks({ status: 'ready', data }))
+      .catch(() => setLinks((current) => (current.data ? current : { status: 'error', data: null })))
+      .finally(() => { if (linksRequest.current === request) linksRequest.current = null; });
+    linksRequest.current = request;
+    setLinks((current) => (current.data ? current : { status: 'loading', data: null }));
+  }, [api]);
+  useEffect(() => { loadLinks(); }, [loadLinks]);
+
   const kind = snapshot?.kind && snapshot.kind !== 'other' ? snapshot.kind : snapshot?.graph?.map?.kind || map?.kind;
   const words = flowVocabulary(kind);
   const kindRef = useRef(kind); kindRef.current = kind;
   const graph = snapshot?.graph || null;
   const safeGraph = graph || EMPTY_GRAPH;
   const invalid = snapshot && snapshot.sourceStatus?.valid === false ? snapshot.sourceStatus : null;
-  const editable = Boolean(snapshot && graph && map?.editable !== false && snapshot.editable !== false && !invalid);
+  // The map's own live snapshot decides; the project list can lag behind it.
+  const editable = Boolean(snapshot && graph && snapshot.editable !== false && !invalid);
   const editableRef = useRef(editable); editableRef.current = editable;
 
   const notify = useCallback((text, error = false) => setToast({ text, error }), []);
@@ -170,6 +190,9 @@ function FlowStudio({ api, map }) {
     if (!exists) { setSelection(null); if (panel === 'inspect') setPanel(null); }
   }, [graph, selection, panel]);
   useEffect(() => {
+    if (graph && panel === 'brief' && briefFocus && !graph.steps.some((step) => step.id === briefFocus)) setPanel(null);
+  }, [graph, panel, briefFocus]);
+  useEffect(() => {
     if (!graph) return;
     if (highlightTag && !graph.tags.some((tag) => tag.id === highlightTag)) setHighlightTag(null);
     if (focusLane && focusLane !== SHARED_BAND_ID && !graph.lanes.some((lane) => lane.id === focusLane)) setFocusLane(null);
@@ -200,6 +223,10 @@ function FlowStudio({ api, map }) {
       try { await navigator.clipboard.writeText(text); notify(message); } catch { notify('복사하지 못했어요. 직접 골라서 복사해 주세요.', true); }
     },
     openTags: () => setPanel('tags'),
+    clearHistory: () => updateHistory({ undo: [], redo: [] }),
+    openBrief: (stepId = null) => { setBriefFocus(stepId); if (!stepId) setSelection(null); setPanel('brief'); },
+    openFeature: (file, id) => map?.onOpenFeature?.(file, id),
+    loadLinks,
     focusLane: (laneId) => setFocusLane(laneId),
     addNext: async (stepId) => openCreated(await send(nextStepOperation(snapshotRef.current.graph, stepId, NEW_STEP_LABEL), '다음 단계 추가'), 'steps', 'step'),
     addInLane: async (laneId) => openCreated(await send(laneStepOperation(snapshotRef.current.graph, laneId, NEW_STEP_LABEL), '단계 추가'), 'steps', 'step'),
@@ -223,7 +250,7 @@ function FlowStudio({ api, map }) {
       const result = await send({ type: 'removeArrow', source: arrow.source, target: arrow.target }, '화살표 지우기', { select: null });
       if (result.ok) { setPanel(null); notify('화살표를 지웠어요.'); }
     },
-  }), [drafts, send, select, notify, openCreated, words]);
+  }), [drafts, send, select, notify, openCreated, words, updateHistory, loadLinks, map]);
   const showUnsaved = () => {
     const [key] = drafts.failed()[0] || [];
     if (!key) return;
@@ -263,6 +290,15 @@ function FlowStudio({ api, map }) {
   }, [travel, panel, selection, highlightTag, focusLane, act]);
 
   const layout = useMemo(() => (graph ? layoutFlow(graph, { notes }) : null), [graph, notes]);
+  const stepStates = useMemo(() => flowStepStates(graph), [graph]);
+  useEffect(() => {
+    const id = initialStep.current;
+    if (!id || !graph) return;
+    initialStep.current = null;
+    try { const url = new URL(window.location.href); url.searchParams.delete('step'); window.history.replaceState(window.history.state, '', url); } catch { /* the address keeps the step */ }
+    if (graph.steps.some((step) => step.id === id)) select({ kind: 'step', id });
+    else notify('이 단계를 지도에서 찾을 수 없어요.', true);
+  }, [graph, select, notify]);
   const emphasis = useMemo(() => emphasisFor(graph, { tagId: highlightTag, laneId: focusLane }), [graph, highlightTag, focusLane]);
   const canvasSelect = useCallback((next) => select(next), [select]);
   const onConnect = useCallback((source, target) => { act.connect(source, target); }, [act]);
@@ -302,8 +338,11 @@ function FlowStudio({ api, map }) {
           <button type="button" className="fm-icon-button" aria-label="되돌리기" title="되돌리기 (⌘Z)" disabled={!history.undo.length} onClick={() => travel('undo')} data-testid="fm-undo"><FlowIcon name="undo" size={15} /></button>
           <button type="button" className="fm-icon-button" aria-label="다시 하기" title="다시 하기 (⇧⌘Z)" disabled={!history.redo.length} onClick={() => travel('redo')} data-testid="fm-redo"><FlowIcon name="redo" size={15} /></button>
         </>}
+        {graph && <button type="button" className={`fm-button fm-button--small${panel === 'turns' ? ' is-on' : ''}`} aria-pressed={panel === 'turns'} onClick={() => setPanel(panel === 'turns' ? null : 'turns')}
+          title="지금 모습을 턴으로 기록하고 지난 턴을 봐요" data-testid="fm-open-turns"><FlowIcon name="history" size={13} /><span>턴{safeGraph.turns?.length ? ` ${safeGraph.turns.length}` : ''}</span></button>}
         <button type="button" className={`fm-button fm-button--small${notes ? ' is-on' : ''}`} aria-pressed={notes} disabled={!hasNotes} title={hasNotes ? '카드에 설명 첫 줄 보이기' : '설명이 있는 단계가 없어요'} onClick={toggleNotes}><FlowIcon name="comment" size={13} /><span>설명 보기</span></button>
         <button type="button" className={`fm-button fm-button--small${panel === 'source' ? ' is-on' : ''}`} aria-pressed={panel === 'source'} onClick={() => setPanel(panel === 'source' ? null : 'source')} data-testid="fm-open-source"><FlowIcon name="code" size={13} /><span>원문</span></button>
+        {graph && api.requestBrief && <button type="button" className="fm-button fm-button--small fm-button--dark" onClick={() => act.openBrief(null)} data-testid="fm-open-brief"><FlowIcon name="mail" size={13} /><span>AI와 논의</span></button>}
       </div>
     </header>
     {graph && <div className="fm-toolbar" role="toolbar" aria-label="보기">
@@ -314,6 +353,7 @@ function FlowStudio({ api, map }) {
         <button type="button" className="fm-text-button" onClick={() => { setSelection(null); setPanel('tags'); }}>{safeGraph.tags.length ? '관리' : '표시 만들기'}</button>
       </div>
       <div className="fm-toolbar__side">
+        <StateLegend states={stepStates} />
         <ArrowLegend />
         {safeGraph.lanes.length > 0 && <label className="fm-select fm-select--small"><span className="fm-sr-only">{words.laneFocus}</span>
           <select value={focusLane ?? ''} onChange={(event) => setFocusLane(event.target.value || null)} data-testid="fm-focus-lane">
@@ -334,7 +374,7 @@ function FlowStudio({ api, map }) {
       <button type="button" className="fm-text-button" onClick={() => { setHighlightTag(null); setFocusLane(null); }}>모두 보기</button>
     </div>}
     <div className="fm-body">
-      {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} storageKey={viewportKey(map)} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId}
+      {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} storageKey={viewportKey(map)} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId} stepStates={stepStates}
         onSelect={canvasSelect} onConnect={onConnect} onAddNext={onAddNext} onInsert={onInsert} onAddInLane={onAddInLane} onSelectLane={onSelectLane}
         onFocusLane={setFocusLane} onAddLane={act.addLane} /> : <div className="fm-empty"><p>그림을 그릴 수 없어요. 원문을 확인해 주세요.</p></div>}
       {graph && !safeGraph.steps.length && !safeGraph.lanes.length && <div className="fm-start">
@@ -342,8 +382,14 @@ function FlowStudio({ api, map }) {
         {editable && <div className="fm-row"><button type="button" className="fm-button fm-button--dark" onClick={() => act.addInLane(null)}><FlowIcon name="plus" size={14} />첫 단계 추가</button>
           <button type="button" className="fm-button" onClick={act.addLane}>{words.laneAdd}</button></div>}
       </div>}
-      {panel && <aside className={`fm-panel${panel === 'source' ? ' fm-panel--wide' : ''}`} aria-label="자세히 보기" data-testid="fm-panel">
-        {panel === 'inspect' && selectedStep && <StepPanel step={selectedStep} graph={safeGraph} words={words} editable={editable} act={act} focusLabel={focusLabel === selectedStep.id} />}
+      {panel && <aside className={`fm-panel${panel === 'source' ? ' fm-panel--wide' : panel === 'brief' ? ' fm-panel--brief' : ''}`} aria-label="자세히 보기" data-testid="fm-panel">
+        {panel === 'inspect' && selectedStep && <StepPanel step={selectedStep} graph={safeGraph} words={words} editable={editable} act={act} focusLabel={focusLabel === selectedStep.id}
+          state={stepStates.get(selectedStep.id)} links={links} tab={stepTab} onTab={setStepTab} />}
+        {panel === 'turns' && <TurnsPanel graph={safeGraph} editable={editable} act={act} header={<PanelHeader eyebrow={words.kindLabel} title="턴 기록" onClose={() => setPanel(null)} />} />}
+        {panel === 'brief' && <BriefPanel key={briefFocus || 'all'} focusStep={briefFocus ? safeGraph.steps.find((step) => step.id === briefFocus) : null}
+          mapKey={`project:${map?.project ?? ''}:${snapshot.mapPath}`} api={api} act={act}
+          header={<PanelHeader eyebrow={briefFocus ? 'AI에 전달 · 단계' : 'AI와 논의'} title={briefFocus ? safeGraph.steps.find((step) => step.id === briefFocus)?.label ?? '' : title}
+            onClose={() => setPanel(briefFocus ? 'inspect' : null)} />} />}
         {panel === 'inspect' && selectedArrow && <ArrowPanel arrow={selectedArrow} graph={safeGraph} editable={editable} act={act} />}
         {panel === 'inspect' && selectedLane && <LanePanel lane={selectedLane} graph={safeGraph} words={words} editable={editable} act={act} focusLane={focusLane} focusLabel={focusLabel === selectedLane.id} />}
         {panel === 'map' && <MapPanel graph={safeGraph} fallbackTitle={fallbackTitle} words={words} editable={editable} act={act} />}
