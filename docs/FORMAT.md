@@ -179,8 +179,37 @@ in its declared tab, or under 기타 그림, with the reason and the line number
 Shape map never rewrites such a file. Once the file is fixed, it becomes editable
 without a restart.
 
-Shape map writes only the `.mmd` files that a person edits. Canvas state for
-project maps stays in Shape map's local state directory, never in the project.
+Shape map writes only the `.mmd` files that a person edits or creates. Canvas
+state for project maps stays in Shape map's local state directory, never in the
+project.
+
+### Creating a map
+
+A map created from the app starts from a small template, written by the same
+canonical writer that edits use. It passes `npm run map -- check`, and
+`npm run map -- format` leaves it unchanged. The header holds the kind, the
+title, and the description when one was given.
+
+| Kind | Starter content |
+| --- | --- |
+| `features` | One root feature, `root(["title"])`, in one category `feature` (기능, "제품이 하는 일"). A `"` in the title becomes `”` in the root label only. |
+| `user-flow` | One lane `lane-1["사용자"]` with one start step `step-1(["시작"])`. |
+| `system-flow` | One lane `lane-1["서비스"]` with one start step `step-1(["시작"])`. |
+
+The file name is `NN-slug.mmd`. `NN` is one more than the highest leading number
+already used in `docs/maps` (by any file), with at least two digits, so the new
+map comes last in its tab among numbered files. `slug` is the ASCII letters and
+digits of the title in lower case, joined by `-` and at most 40 characters; a
+title without any, such as a Korean title, uses the kind (`features`,
+`user-flow`, or `system-flow`). If a name is taken, including one that differs
+only in letter case, the next number is used. Renaming a map later changes only
+its header; the file name stays.
+
+The file is written to a temporary name starting with `.` in `docs/maps` and
+then published under its final name only if that name is still free, so the map
+appears complete or not at all and an existing file is never replaced.
+`docs/` and `docs/maps/` are created when missing; they must resolve inside
+the project.
 
 ## Flow maps
 

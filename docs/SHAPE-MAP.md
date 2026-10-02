@@ -236,6 +236,16 @@ file-name order. The address holds the project and the map, so links, reloads,
 and back and forward return to the same map. Maps added, removed, or changed on
 disk appear without reloading.
 
+**새 지도** in the project bar creates a map. People choose its kind (기능
+계통도, 유저 플로우, or 시스템 플로우, starting on the open tab's kind), give it
+a title, and optionally one line of description. Shape map writes a
+[starter file](FORMAT.md#creating-a-map) into the repository's `docs/maps`,
+lists it, and opens it in its tab, ready to edit. A repository without maps
+shows **첫 지도 만들기** instead of an empty screen, and creating its first map
+also creates the `docs/maps` folder. An existing file is never replaced.
+**지도 정보** changes a feature map's title and one-line description; flow maps
+edit theirs beside the title on their canvas. The file name does not change.
+
 A 기능 계통도 tab opens the canvas described above, bound to that map. Requests,
 live updates, browser drafts, and saved views all belong to that project and map;
 switching maps never sends a pending save to another map. Canvas state for
@@ -289,5 +299,4 @@ the element still exists. A file that breaks after opening pauses editing with a
 notice until it is fixed.
 
 Flow maps do not yet have comments, proposals, review colors, or turns. Cards
-cannot be placed by hand, new map files are created outside the app, and flow
-steps are not yet linked to features.
+cannot be placed by hand, and flow steps are not yet linked to features.

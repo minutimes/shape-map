@@ -205,6 +205,20 @@ the single-map behavior above is unchanged. Project maps follow
 - `GET /api/project/events?project=KEY` is an SSE stream of `maps` events carrying
   that list whenever a map file is added, removed, or renamed, or changes kind,
   title, or validity.
+- `POST /api/project/maps?project=KEY` creates a map from a
+  [starter template](FORMAT.md#creating-a-map). The body is
+  `{ "kind", "title", "description?" }`: `kind` is `features`, `user-flow`, or
+  `system-flow`; `title` and `description` follow the map header rules, are
+  trimmed, and an empty description is left out. Other fields are rejected. The
+  server picks the file name; a request cannot name a file or a folder. It
+  creates `docs/` and `docs/maps/` when they are missing, writes the new file
+  only when that name is still free, and never replaces a file. The response is
+  `201` with `{ "project", "maps", "map" }`, where `map` is the new list entry and
+  `maps` the whole list; `maps` subscribers get the same list. Errors: 404
+  `project_not_found` for a project that is not listed; 422 `validation_error`
+  for the body; 422 `maps_folder_unavailable` when `docs` or `docs/maps` is a
+  file or resolves outside the project; 422 `map_name_unavailable` when no free
+  name is found. Nothing else is written into the project.
 
 Every existing route (`/api/map`, `/api/events`, `/api/mutations`, `/api/view`,
 `/api/brief`, `/api/subtree/:id`, `/api/health`, and `/api/repository`) accepts
@@ -289,7 +303,11 @@ revision returns 409 `revision_conflict` with a fresh snapshot. An operation who
 canonical result equals the current source skips the write and the SSE event.
 `replaceSource` writes its text as given once it parses and passes Mermaid
 validation, so undo can restore a file exactly; it is not reordered.
-`features` maps in a project use the v1 operations above.
+`features` maps in a project use the v1 operations above, plus `setMapHeader`
+with the same optional `title` and `description` fields (`null` or empty text
+removes one). A features map without a header gains `{"kind":"features",...}`
+only when it gets a title or description; a header that exists is kept, even
+when both are removed. Unknown fields, such as `kind`, are rejected.
 
 `npm run map -- check PATH` validates one map file or a `docs/maps` folder without
 a running server. It prints each file's kind, title, and first error with its
