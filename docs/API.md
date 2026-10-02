@@ -253,7 +253,11 @@ A map that cannot be edited is served with `"editable": false`, its `source`, an
 unless an earlier valid version is still shown. Its `kind` is the declared kind
 when it is known and `other` otherwise. Mutations on it return 422
 `read_only_map`; a map that became invalid after opening keeps the v1 behavior
-and returns `invalid_source`.
+and returns `invalid_source`, with `sourceStatus.line` when one line is at fault.
+A kind this version does not know is also kept as `declaredKind` in the snapshot.
+`/api/brief` and `/api/subtree/:id` serve only `features` maps, and `/api/view`
+keeps canvas state only for `features` maps; other kinds return 422
+`unsupported_map_kind`, and a read-only map returns 422 `read_only_map`.
 
 ### Flow map operations
 
@@ -283,6 +287,8 @@ Generated IDs are the smallest unused `step-N` or `lane-N`. Validation failures
 return 422 `validation_error`; source errors include `details.line`. A stale
 revision returns 409 `revision_conflict` with a fresh snapshot. An operation whose
 canonical result equals the current source skips the write and the SSE event.
+`replaceSource` writes its text as given once it parses and passes Mermaid
+validation, so undo can restore a file exactly; it is not reordered.
 `features` maps in a project use the v1 operations above.
 
 `npm run map -- check PATH` validates one map file or a `docs/maps` folder without

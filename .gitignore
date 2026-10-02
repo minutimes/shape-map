@@ -9,3 +9,4 @@ test-results/
 
 # Local navigation is separate from the shared product description.
 maps/*.view.json
+.state/

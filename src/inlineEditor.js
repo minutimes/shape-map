@@ -23,7 +23,8 @@ export function normalizedValue(path, value) {
 
 /** Per-card drafts: typing does not rebuild the graph or send a map snapshot. */
 export class InlineEditor {
-  constructor({ send, storage, debounceMs = 650, maxWaitMs = 4000 }) {
+  constructor({ send, storage, scope = '', debounceMs = 650, maxWaitMs = 4000 }) {
+    this.scope = scope;
     this.send = send;
     this.storage = storage;
     this.debounceMs = debounceMs;
@@ -60,7 +61,7 @@ export class InlineEditor {
     if (!snapshot?.graph) return;
     this.snapshot = snapshot;
     this.nodes = new Map(snapshot.graph.nodes.map((node) => [node.id, node]));
-    const key = `final-shape-map:inline-drafts:v1:${snapshot.mapPath}`;
+    const key = `final-shape-map:inline-drafts:v1:${this.scope}${snapshot.mapPath}`;
     if (this.key !== key) {
       this.generation++;
       this.flight = null;

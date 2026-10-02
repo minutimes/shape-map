@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { createMapStore } from '../lib/store.mjs';
+import { createWorkspace } from '../lib/workspace.mjs';
 import { createApiApp } from './app.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,7 +22,16 @@ const store = await createMapStore({
   dataRoot,
   mapPath: process.env.FINAL_SHAPE_MAP_PATH || process.env.MLC_MAP_PATH || 'maps/shape-map.mmd',
 });
-const app = createApiApp(store);
+// With a workspace root, Shape map lists the product repositories inside it.
+const workspaceRoot = process.env.SHAPE_MAP_WORKSPACE_ROOT;
+const workspace = workspaceRoot
+  ? await createWorkspace({
+    root: path.resolve(workspaceRoot),
+    stateDir: path.resolve(projectRoot, process.env.SHAPE_MAP_STATE_DIR || '.state'),
+  })
+  : null;
+workspace?.on('watch-error', (error) => console.error(error));
+const app = createApiApp(store, { workspace });
 let vite;
 
 if (dev) {
@@ -42,6 +52,7 @@ async function shutdown() {
   server.close();
   await vite?.close();
   await store.close();
+  await workspace?.close();
 }
 process.once('SIGINT', () => shutdown().finally(() => process.exit(0)));
 process.once('SIGTERM', () => shutdown().finally(() => process.exit(0)));
