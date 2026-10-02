@@ -248,16 +248,41 @@ async function run() {
 
   // Mind-map creation grammar: Tab adds a child, Enter adds a sibling, and both
   // new cards immediately focus an empty inline editor.
+  // Record every card that React Flow hides to measure it again. A hidden
+  // frame takes focus away from an open name box, so a redraw must never hide
+  // a card that was already measured. The CPU is slowed to widen any race.
+  await page.evaluate(() => {
+    window.__hiddenCards = [];
+    new MutationObserver((records) => records.forEach(({ target }) => {
+      if (target.classList?.contains('react-flow__node') && target.style.visibility === 'hidden') {
+        target.getBoundingClientRect(); // lay out the hidden frame now, as a slow machine would
+        window.__hiddenCards.push(target.dataset.id);
+      }
+    })).observe(document.querySelector('.react-flow'), { subtree: true, attributes: true, attributeFilter: ['style'] });
+  });
+  const cpu = await page.context().newCDPSession(page);
+  await cpu.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   await selectNode(page, 'stages');
   await page.keyboard.press('Tab');
   const tabInput = page.getByTestId('inline-rename-input');
-  await tabInput.waitFor({ state: 'visible', timeout: 5000 });
-  await waitUntil(async () => (
+  const tabEditorReady = async () => (
     await tabInput.count() === 1
     && await tabInput.evaluate((input) => document.activeElement === input && input.value === '')
-  ), {
-    message: 'Tab child did not enter an empty focused editor',
-  });
+  );
+  await tabInput.waitFor({ state: 'visible', timeout: 8000 });
+  await waitUntil(tabEditorReady, { timeoutMs: 8000, message: 'Tab child did not enter an empty focused editor' });
+  // A change saved elsewhere redraws the canvas; the open name box must survive it.
+  const planningLabel = (await snapshot()).graph.nodes.find((node) => node.id === 'planning').label;
+  for (const label of ['편집 중 외부 변경', planningLabel]) {
+    await page.evaluate(() => { window.__hiddenCards = []; });
+    await mutate({ type: 'renameNode', id: 'planning', label });
+    await page.getByTestId('node-planning').getByText(label, { exact: true }).waitFor({ timeout: 8000 });
+    await page.waitForTimeout(300);
+    const hidden = await page.evaluate(() => window.__hiddenCards);
+    assert(!hidden.length, `A redraw hid measured cards while a name box was open: ${JSON.stringify([...new Set(hidden)])}`);
+    assert(await tabEditorReady(), 'An outside change closed the empty name box of the new card');
+  }
+  await cpu.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   await tabInput.fill('Tab으로 만든 하위');
   await tabInput.press('Enter');
   const tabChild = await waitUntil(async () => {
