@@ -164,7 +164,7 @@ async function main() {
     await page.waitForTimeout(900);
     const stray = requests.filter((request) => request.at >= switchAt && request.method !== 'GET' && !request.url.includes('map=01-features.mmd'));
     check('no write reaches another map after switching', stray.length === 0, stray.map((request) => `${request.method} ${request.url}`).join(', '));
-    check('flow map mounts the flow workspace', await page.getByText(/단계 \d+개/).isVisible());
+    check('flow map mounts the flow workspace', await page.getByTestId('fm-workspace').waitFor().then(() => true));
     const chips = await page.locator('.sm-shell-chips button').allTextContents();
     check('user flow tab shows map chips', chips.length === 2, chips.join(', '));
     await screenshot(page, 'project-user-flow-1440');
@@ -213,7 +213,7 @@ async function main() {
     // A deep link opens the right tab.
     const deep = await context.newPage();
     await deep.goto(`${origin}/?project=bookshelf&map=03-lending-system.mmd`);
-    await deep.getByText(/단계 \d+개/).waitFor();
+    await deep.getByTestId('fm-workspace').waitFor();
     check('deep link opens the system flow tab', (await tabs(deep)).find((tab) => tab.current)?.text.startsWith('시스템 플로우'));
     // The detailed editor opens the same project map; other kinds go back to the shell.
     await deep.goto(`${origin}/?project=bookshelf&map=01-features.mmd&editor=1`);

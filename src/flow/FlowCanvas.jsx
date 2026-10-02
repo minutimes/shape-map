@@ -100,6 +100,8 @@ function LaneRail({ layout, graph, words, tagsById, selectedLane, focusLane, emp
 
 function ZoomControls({ canvasRef, onFit }) {
   const { zoom } = useViewport();
+  // Handles and the drop zone keep a usable on-screen size at any zoom.
+  useEffect(() => { canvasRef.current?.style.setProperty('--fm-zoom', String(zoom)); }, [canvasRef, zoom]);
   const { zoomIn, zoomOut, zoomTo } = useCenteredZoom({ canvasRef, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM });
   return <div className="fm-zoom" role="group" aria-label="확대와 축소">
     <button type="button" onClick={() => zoomOut()} aria-label="축소"><FlowIcon name="minus" size={14} /></button>
@@ -142,9 +144,10 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
     id: arrow.key, type: 'flow', source: arrow.source, target: arrow.target, sourceHandle: 'out', targetHandle: 'in',
     selected: arrow.key === selectedArrow, focusable: true, interactionWidth: 0,
     ariaLabel: `화살표: ${labelOf.get(arrow.source)}에서 ${labelOf.get(arrow.target)}${arrow.label ? `, ${arrow.label}` : ''}`,
-    zIndex: arrow.key === selectedArrow ? 2 : arrow.style === 'exchange' ? 1 : 0,
     data: { arrow, editable, emphasis: emphasis?.arrows.get(arrow.key) ?? null, onSelect: (key) => onSelect({ kind: 'arrow', id: key }), onInsert },
-  })), [layout.arrows, selectedArrow, emphasis, editable, labelOf, onSelect, onInsert]);
+  // Handoffs and the selected arrow draw last, but every arrow stays under the cards.
+  })).sort((a, b) => (a.selected - b.selected) || ((a.data.arrow.style === 'exchange') - (b.data.arrow.style === 'exchange'))),
+  [layout.arrows, selectedArrow, emphasis, editable, labelOf, onSelect, onInsert]);
 
   const fit = useCallback((duration = 0) => {
     const element = canvasRef.current; if (!element) return;

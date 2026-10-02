@@ -182,6 +182,8 @@ async function run() {
   report.checks.delete = true;
 
   // Connect two steps by dragging from the handle onto a card.
+  await page.getByRole('button', { name: '지도 전체 보기' }).click();
+  await page.waitForTimeout(300);
   await page.getByTestId('fm-step-owner_list').hover();
   const handle = page.locator('[data-id="owner_list"] .fm-handle--out');
   const from = await handle.boundingBox();

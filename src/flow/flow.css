@@ -139,7 +139,7 @@ button.fm-rail__title:hover { text-decoration: underline; text-underline-offset:
 .fm-chip--small { height: 18px; padding: 0 6px; gap: 4px; font-size: 10px; }
 .fm-chip.is-dashed { border-style: dashed; }
 .fm-chip--more { background: #f2f2f5; color: #6c6c75; border-color: #e2e2e7; }
-.fm-handle.react-flow__handle { width: 11px; height: 11px; background: #fff; border: 1.5px solid var(--fm-ink); border-radius: 50%; opacity: 0; transition: opacity .12s; }
+.fm-handle.react-flow__handle { --fm-handle: clamp(11px, calc(11px / var(--fm-zoom, 1)), 40px); width: var(--fm-handle); height: var(--fm-handle); background: #fff; border: calc(1.5px / min(1, var(--fm-zoom, 1))) solid var(--fm-ink); border-radius: 50%; opacity: 0; transition: opacity .12s; }
 .fm-handle--in.react-flow__handle { width: 16px; height: 28px; border: 0; background: transparent; }
 .fm-step:hover .fm-handle--out, .fm-step.is-selected .fm-handle--out { opacity: 1; }
 .fm-step.is-columns .fm-handle--in.react-flow__handle { width: 28px; height: 16px; }
