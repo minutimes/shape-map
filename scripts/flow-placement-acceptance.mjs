@@ -8,19 +8,18 @@
  * arrows are sampled along their paths to make sure none crosses a card.
  * Run `npm run build` first. Screenshots go to test-results/flow-placement/.
  *
- *   FLOW_PLACEMENT_PORT=4371 node scripts/flow-placement-acceptance.mjs
+ *   node scripts/flow-placement-acceptance.mjs   (a free port; FLOW_PLACEMENT_PORT pins one)
+ *   npm run test:browser -- placement            (builds, then runs it with the other checks)
  */
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { evidenceDir, launchBrowser, root, startServer } from './support/browser-check.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.env.FLOW_PLACEMENT_PORT || 4371);
-const origin = `http://127.0.0.1:${port}`;
-const shots = path.join(root, 'test-results', 'flow-placement');
+const fixedPort = Number(process.env.FLOW_PLACEMENT_PORT) || undefined;
+let origin = '';
+let shots = path.join(root, 'test-results', 'flow-placement');
 const results = [];
 const screenshots = {};
 
@@ -41,15 +40,6 @@ async function until(fn, { timeout = 8000, message = 'timed out' } = {}) {
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
 }
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundled = chromium.executablePath();
-  const match = bundled.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundled;
-  const candidate = path.join(match[1], `chromium_headless_shell-${match[2]}`, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
-  return fs.access(candidate).then(() => candidate, () => bundled);
-}
-
 async function makeWorkspace() {
   const temporary = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'shape-placement-')));
   const workspaceRoot = path.join(temporary, 'root');
@@ -60,15 +50,6 @@ async function makeWorkspace() {
   git(bookshelf, 'add', '.');
   git(bookshelf, 'commit', '-q', '-m', 'Sample maps');
   return { temporary, workspaceRoot, bookshelf, maps: path.join(bookshelf, 'docs/maps'), state: path.join(temporary, 'state') };
-}
-
-async function startServer(environment) {
-  const child = spawn(process.execPath, ['server/index.mjs'], { cwd: root, env: { ...process.env, FINAL_SHAPE_MAP_PORT: String(port), ...environment }, stdio: ['ignore', 'pipe', 'pipe'] });
-  let output = '';
-  child.stdout.on('data', (chunk) => { output += chunk; });
-  child.stderr.on('data', (chunk) => { output += chunk; });
-  await until(async () => (await fetch(`${origin}/api/health`)).ok, { timeout: 15000, message: `server did not start: ${output}` });
-  return child;
 }
 
 async function screenshot(page, name, note) {
@@ -153,10 +134,11 @@ async function viewFile(workspace, map) {
 const spotsOf = async (workspace, map) => (await viewFile(workspace, map))?.flow?.positions || {};
 
 async function run() {
-  await fs.mkdir(shots, { recursive: true });
+  shots = await evidenceDir('flow-placement');
   const workspace = await makeWorkspace();
-  const server = await startServer({ SHAPE_MAP_WORKSPACE_ROOT: workspace.workspaceRoot, SHAPE_MAP_STATE_DIR: workspace.state });
-  const browser = await chromium.launch({ executablePath: await headlessShellPath() });
+  const server = await startServer({ SHAPE_MAP_WORKSPACE_ROOT: workspace.workspaceRoot, SHAPE_MAP_STATE_DIR: workspace.state }, { port: fixedPort });
+  origin = server.origin;
+  const browser = await launchBrowser();
   const errors = [];
   const lendingFile = path.join(workspace.maps, '02-lending.mmd');
   const pristine = await fs.readFile(lendingFile, 'utf8');
@@ -350,7 +332,7 @@ async function run() {
     throw error;
   } finally {
     await browser.close();
-    server.kill();
+    await server.stop();
     await fs.writeFile(path.join(shots, 'report.json'), `${JSON.stringify({ results, screenshots }, null, 2)}\n`);
     await fs.rm(workspace.temporary, { recursive: true, force: true });
   }
