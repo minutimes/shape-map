@@ -223,3 +223,71 @@ until the user chooses. Network or source errors retain the last valid graph.
 Limits: 4,000 characters per text field, 100 source paths per block, 1,000 comments
 per block, 100 turns, 1 MiB per turn, and 16 MiB per source. No model call, mail
 delivery, telemetry, or hosted multi-user service is required to run the app.
+
+## Product repositories
+
+With `SHAPE_MAP_WORKSPACE_ROOT`, the home screen lists the Git repositories in
+that folder. Worktrees that hold maps appear under their repository with their
+branch, and repositories without maps are listed quietly with a hint on how to
+add them. Opening a project shows its [project maps](FORMAT.md#project-maps) in
+tabs, in this order: 기능 계통도, 유저 플로우, 시스템 플로우, and 기타 그림.
+Each tab shows its count, and a tab with several maps shows one chip per map in
+file-name order. The address holds the project and the map, so links, reloads,
+and back and forward return to the same map. Maps added, removed, or changed on
+disk appear without reloading.
+
+A 기능 계통도 tab opens the canvas described above, bound to that map. Requests,
+live updates, browser drafts, and saved views all belong to that project and map;
+switching maps never sends a pending save to another map. Canvas state for
+project maps stays in Shape map's `.state/` folder, so only the edited `.mmd`
+changes in the repository.
+
+A map that cannot be edited is drawn read-only by Mermaid, with a short reason
+in Korean and the line at fault. 원본 보기 shows the numbered source with that
+line marked. Shape map never writes such a file; once it is fixed, the map opens
+for editing without a restart.
+
+## Flow canvas
+
+유저 플로우 and 시스템 플로우 share one canvas. Each lane is a row: a
+participant (참여자) in a user flow, an area (영역) in a system flow. Lane titles
+stay in a fixed column while the canvas pans and zooms, and shared steps get
+their own row. Steps run left to right in arrow order and line up across lanes.
+Branches stack instead of overlapping. Only genuine returns point backwards, and
+they route around cards. Arrow labels sit between cards; a long label is
+shortened, with the full text on hover. A system flow without lanes is drawn as
+a vertical flowchart.
+
+Next steps (`-->`) are solid lines, other ways (`-.->`) are dashed, and handoffs
+or exchanges (`==>`) are thick. Tags appear as chips on cards and lanes; a dashed
+tag gives its cards a dashed outline. Readers can highlight one tag, show one
+participant or area, and turn on 설명 보기 to put the first line of each
+description on its card. These reading choices never change the file.
+
+A map opens fitted to the screen while it stays readable. A longer map opens at
+a readable zoom at its start, with an overview; the fit button still shows the
+whole map. A map opened again returns to its last view, which is kept in the
+browser.
+
+People edit on the diagram. They can:
+
+- select a step to change its text, description, shape (행동, 갈림길, or 시작·끝),
+  tags, lane, and order;
+- add the next step from a step, or insert a step on an arrow;
+- delete a step, which keeps its chain connected;
+- drag from one step to another to connect them, and change an arrow's text and
+  kind;
+- add, rename, reorder, and delete lanes (deleting a lane with steps asks first);
+- create and edit tags, and the map's title and description;
+- edit the Mermaid source, with errors explained in Korean at their line.
+
+Undo and redo restore the file exactly, and an edit from another client clears
+that history. Every edit names the revision it started from. A conflict keeps
+the typed text with a retry, and unsaved text stays with its element until it is
+saved or discarded. A change on disk appears live and keeps the selection when
+the element still exists. A file that breaks after opening pauses editing with a
+notice until it is fixed.
+
+Flow maps do not yet have comments, proposals, review colors, or turns. Cards
+cannot be placed by hand, new map files are created outside the app, and flow
+steps are not yet linked to features.
