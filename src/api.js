@@ -33,6 +33,11 @@ export function createMapApi(binding = null) {
     saveView: async ({ baseRevision, clientId, patch }) => decode(await fetch(url('/api/view'), {
       method: 'PUT', headers: json, body: JSON.stringify({ baseRevision, clientId, patch }),
     })),
+    requestBrief: async (request) => decode(await fetch(url('/api/brief'), {
+      method: 'POST', headers: json, body: JSON.stringify(request),
+    })),
+    // Explicit links between flow steps and features of this project (project maps only).
+    readLinks: binding ? async () => decode(await fetch(`/api/project/links?${new URLSearchParams({ project: binding.project })}`, { headers: { Accept: 'application/json' } })) : null,
   });
 }
 

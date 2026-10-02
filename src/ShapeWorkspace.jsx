@@ -70,7 +70,28 @@ function groupedLenses(lenses) {
   return Object.entries((lenses || []).reduce((groups, lens) => { const name = lens.group || lens.label; groups[name] = [...(groups[name] || []), lens]; return groups; }, {}));
 }
 
-function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, mapPath, send, busy, onClose, onOpen, onRepository, onBrief, onDuplicate, onDelete, initialTab = 'overview', initialEditing = false }) {
+/** Flow steps (유저 플로우, 시스템 플로우) that link to this feature; links live in the flow files. */
+function FlowStepLinks({ nodeId, flowLinks }) {
+  const [state, setState] = useState({ status: 'loading', steps: [] });
+  useEffect(() => {
+    let cancelled = false;
+    flowLinks.read().then((data) => {
+      if (cancelled) return;
+      const steps = data.flows.flatMap((flow) => flow.steps.filter((step) => step.features.some((link) => link.map === flowLinks.mapFile && link.id === nodeId))
+        .map((step) => ({ flow, step })));
+      setState({ status: 'ready', steps });
+    }).catch(() => { if (!cancelled) setState({ status: 'error', steps: [] }); });
+    return () => { cancelled = true; };
+  }, [nodeId, flowLinks]);
+  if (state.status === 'loading' || (state.status === 'ready' && !state.steps.length)) return null;
+  return <section className="sm-inspector__children sm-flow-links" data-testid="feature-flow-links"><h3>이 기능을 쓰는 흐름 단계</h3>
+    {state.status === 'error' ? <p className="sm-tab-intro">흐름 단계를 불러오지 못했습니다.</p>
+      : state.steps.map(({ flow, step }) => <button key={`${flow.file}#${step.id}`} onClick={() => flowLinks.openStep(flow.file, step.id)}>
+        <ShapeIcon name="branch" size={14} /><span>{step.label}<small>{flow.kind === 'system-flow' ? '시스템 플로우' : '유저 플로우'} · {flow.title}</small></span><ShapeIcon name="chevron" size={13} /></button>)}
+  </section>;
+}
+
+function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, mapPath, send, busy, onClose, onOpen, onRepository, onBrief, onDuplicate, onDelete, initialTab = 'overview', initialEditing = false, flowLinks = null }) {
   const [tab, setTab] = useState(initialTab);
   const [idCopied, setIdCopied] = useState(false);
   const inspectorRef = useRef(null);
@@ -158,6 +179,7 @@ function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, map
           </dl>}
           {node.proposal && <button className="sm-proposal-preview" onClick={() => setTab('proposal')}><span><ShapeIcon name="arrow" size={14} />다음에 바꿀 내용</span><strong>{node.proposal.reason || node.proposal.logic || '작성한 변경안을 확인하세요.'}</strong><ShapeIcon name="chevron" size={14} /></button>}
           {children.length > 0 && <section className="sm-inspector__children"><h3>이 안에 들어있는 기능</h3>{children.map((child) => <button key={child.id} onClick={() => onOpen(child.id)}><ShapeIcon name="box" size={14} /><span>{child.label}</span><ShapeIcon name="chevron" size={13} /></button>)}</section>}
+          {flowLinks && <FlowStepLinks nodeId={node.id} flowLinks={flowLinks} />}
           {links.length > 0 && <button className="sm-button sm-inspector-link-button" onClick={() => setTab('links')}><ShapeIcon name="branch" size={14} />이 기능과 연결된 기능 {links.length}개</button>}
           {node.block?.files?.length > 0 && <details className="sm-file-details"><summary><ShapeIcon name="code" size={14} />연결된 코드 {node.block.files.length}개</summary>{node.block.files.map((file) => <code key={file}>{file}</code>)}</details>}
           {!readOnly && <section className="sm-review-section"><h3>직접 확인했나요?</h3><p>확인한 내용이 바뀌면 검수를 다시 요청합니다.</p>
@@ -228,7 +250,7 @@ function BlockInspector({ node, graph, baselineNode, state, turns, readOnly, map
   </aside>;
 }
 
-export default function ShapeWorkspace({ api = legacyMapApi, title, embedded = false }) {
+export default function ShapeWorkspace({ api = legacyMapApi, title, embedded = false, flowLinks = null }) {
   const { readMap, mutateMap, saveView } = api;
   const [snapshot, setSnapshot] = useState(null);
   const snapshotRef = useRef(null);
@@ -661,6 +683,17 @@ export default function ShapeWorkspace({ api = legacyMapApi, title, embedded = f
     if (!nodes.some((item) => item.id === id)) focusNode(node.parentId || node.id);
     setSelectedId(null); setSelectionIds([id]); setRevealId(id);
   }
+  // A link from a flow step (?open=ID) opens that feature once its map is drawn.
+  const openParam = useRef(new URLSearchParams(window.location.search).get('open'));
+  useEffect(() => {
+    const id = openParam.current;
+    if (!id || !graph || !nodes.length) return undefined;
+    openParam.current = null;
+    try { const url = new URL(window.location.href); url.searchParams.delete('open'); window.history.replaceState(window.history.state, '', url); } catch { /* the address keeps the link */ }
+    if (!graph.nodes.some((node) => node.id === id)) { setToast({ error: true, text: '이 기능을 지도에서 찾을 수 없습니다.' }); return undefined; }
+    const frame = requestAnimationFrame(() => showNode(id));
+    return () => cancelAnimationFrame(frame);
+  }, [graph, nodes.length]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!revealId) return; const node = nodes.find((item) => item.id === revealId); if (!node) return;
     flow.setViewport(readableNodeViewport({ ...node, positionAbsolute: absoluteShapePosition(nodes, node.id) }, canvasRef.current?.getBoundingClientRect(), { zoom: .85 })); setRevealId(null);
@@ -826,7 +859,7 @@ export default function ShapeWorkspace({ api = legacyMapApi, title, embedded = f
           <div className="sm-timeline__track"><button className="sm-play" aria-label={playing ? '턴 재생 멈추기' : '개발 턴 재생'} disabled={!turns.length} onClick={() => { if (!playing) { setTurnId(turns[0].id); setSelectedId(null); } setPlaying(!playing); }}><ShapeIcon name={playing ? 'pause' : 'play'} size={15} /></button><div className="sm-turns">{turns.map((turn) => <button key={turn.id} className={`sm-turn${turnId === turn.id ? ' is-selected' : ''}`} onClick={() => chooseTurn(turn.id)}><span className="sm-turn__dot" /><span className="sm-turn__text"><b>턴 {turn.number}</b><span>{turn.title}</span></span><small>{dateText(turn.createdAt)}</small></button>)}<button className={`sm-turn sm-turn--current${!turnId ? ' is-selected' : ''}`} onClick={() => chooseTurn(null)}><span className="sm-turn__dot" /><span className="sm-turn__text"><b>현재</b><span>다음 변화를 준비 중</span></span></button></div></div>
           {turns.length > 0 && <label className="sm-timeline-slider"><span className="sm-sr-only">보고 있는 개발 턴</span><input type="range" min="0" max={turns.length} value={index} onChange={(event) => chooseTurn(turns[Number(event.target.value)]?.id || null)} aria-valuetext={selectedTurn ? `턴 ${selectedTurn.number}: ${selectedTurn.title}` : '현재 형상'} /></label>}
         </footer>}
-        {selected && <ShapeInspectorAnchor nodes={nodes} selectedId={selected.id} anchorId={shapeAncestors(graph, selected.id).reverse().find((item) => nodes.some((node) => node.id === item.id))?.id} canvasRef={canvasRef}><BlockInspector key={`${turnId || 'current'}:${selected.id}:${inspectorIntent?.key || ''}`} initialTab={inspectorIntent?.id === selected.id ? inspectorIntent.tab : 'overview'} initialEditing={inspectorIntent?.id === selected.id && inspectorIntent.edit} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={`${api.storagePrefix}${snapshot.mapPath}`} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={showNode} onRepository={openRepository} onBrief={() => openBrief(selected.id)} onDuplicate={() => duplicateSelected([selected.id])} onDelete={() => deleteSelected([selected.id])} /></ShapeInspectorAnchor>}
+        {selected && <ShapeInspectorAnchor nodes={nodes} selectedId={selected.id} anchorId={shapeAncestors(graph, selected.id).reverse().find((item) => nodes.some((node) => node.id === item.id))?.id} canvasRef={canvasRef}><BlockInspector key={`${turnId || 'current'}:${selected.id}:${inspectorIntent?.key || ''}`} initialTab={inspectorIntent?.id === selected.id ? inspectorIntent.tab : 'overview'} initialEditing={inspectorIntent?.id === selected.id && inspectorIntent.edit} node={selected} graph={graph} baselineNode={previousTurn?.nodes.find((node) => node.id === selected.id)} state={states[selected.id]} turns={visibleTurns} mapPath={`${api.storagePrefix}${snapshot.mapPath}`} readOnly={Boolean(selectedTurn)} send={send} busy={busy} onClose={() => setSelectedId(null)} onOpen={showNode} onRepository={openRepository} flowLinks={selectedTurn ? null : flowLinks} onBrief={() => openBrief(selected.id)} onDuplicate={() => duplicateSelected([selected.id])} onDelete={() => deleteSelected([selected.id])} /></ShapeInspectorAnchor>}
       </section>
     </div>
     {menu && <ShapeContextMenu menu={menu} items={menuItems} onClose={() => setMenu(null)} />}
