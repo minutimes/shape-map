@@ -95,7 +95,9 @@ async function fullLoop(page, project) {
   await page.getByTestId('fm-canvas').click({ position: { x: 30, y: 30 } });
   await page.keyboard.press('Meta+z');
   await until(async () => (await readFlow(project)) === before, { message: 'undo did not restore the file' });
-  check('undo removes the memo and restores the file byte for byte', !(await stateOf(page, 'reader_search')));
+  // The file is restored before the page receives the new snapshot; wait for the card too.
+  await until(async () => !(await stateOf(page, 'reader_search')), { message: 'undo did not clear the memo color' });
+  check('undo removes the memo and restores the file byte for byte', (await readFlow(project)) === before && !(await stateOf(page, 'reader_search')));
   await page.keyboard.press('Meta+Shift+z');
   await until(async () => (await stateOf(page, 'reader_search')) === 'concern', { message: 'redo did not restore the memo' });
   check('redo restores the same memo the service wrote', (await readFlow(project)).includes('검색 결과 순서가 뒤죽박죽이에요'));
@@ -160,6 +162,8 @@ async function fullLoop(page, project) {
   await page.getByTestId('fm-step-label').fill('내 책 올리기');
   await page.getByTestId('fm-step-label').press('Enter');
   await until(async () => (await readFlow(project)).includes('내 책 올리기'));
+  // Judge the card only after it shows the edit, so a stale card cannot pass.
+  await until(async () => (await page.getByTestId('fm-step-owner_list').textContent()).includes('내 책 올리기'), { message: 'the edited label did not appear' });
   check('a live edit after a turn is not blue', !(await stateOf(page, 'owner_list')));
   await page.getByTestId('fm-open-turns').click();
   await page.getByTestId('fm-turn-title').fill('요청 확인 다듬기');
