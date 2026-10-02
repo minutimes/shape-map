@@ -176,9 +176,14 @@ stored in the flow file, never inferred.
 ## Development
 
 ```sh
-npm test
-npm run build
+npm ci
+npm test               # unit and API tests
+npm run build          # compile the app into dist/
+npm run test:browser   # build, then every browser check in headless Chromium
 ```
+
+[Contributing](CONTRIBUTING.md#checks) explains what each check proves and how to
+add one.
 
 The detailed hierarchy editor is available through **원본·고급 편집** or `?editor=1`.
 It retains inline editing, keyboard shortcuts, branch reparenting, undo/redo,

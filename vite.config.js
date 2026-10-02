@@ -13,4 +13,9 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
   },
+  test: {
+    // Only this checkout's unit tests; never nested worktrees or browser checks.
+    include: ['tests/**/*.test.{js,mjs,jsx}'],
+    exclude: ['**/node_modules/**', '.claude/**', 'dist/**'],
+  },
 });

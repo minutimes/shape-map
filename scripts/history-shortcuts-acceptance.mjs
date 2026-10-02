@@ -1,14 +1,16 @@
+#!/usr/bin/env node
+/*
+ * Browser check for undo and redo in the hierarchy editor (`?editor=1`):
+ * drag-selecting two branches, deleting them, and restoring the exact graph
+ * and positions with Ctrl/Cmd+Z and Shift+Z; the root is protected; Backspace
+ * deletes; a rename undoes and redoes. Evidence: test-results/history-shortcuts/.
+ */
 import fs from 'node:fs/promises';
-import net from 'node:net';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { assert, evidenceDir as makeEvidenceDir, launchBrowser, root, startServer } from './support/browser-check.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const evidenceDir = path.join(root, 'test-results', 'history-shortcuts');
-const mapPath = path.join(evidenceDir, 'history-fixture.mmd');
-let port;
+let evidenceDir;
+let mapPath;
 let origin;
 let server;
 let browser;
@@ -38,26 +40,6 @@ function fixtureSource() {
 `;
 }
 
-async function freePort() {
-  const probe = net.createServer();
-  await new Promise((resolve, reject) => probe.listen(0, '127.0.0.1', resolve).once('error', reject));
-  const selected = probe.address().port;
-  await new Promise((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
-  return selected;
-}
-
-async function waitForServer() {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    try {
-      if ((await fetch(`${origin}/api/health`)).ok) return;
-    } catch {
-      // The isolated server is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error('History shortcut fixture server did not start.');
-}
-
 async function snapshot() {
   const response = await fetch(`${origin}/api/map`);
   if (!response.ok) throw new Error(`Snapshot read failed: ${response.status}.`);
@@ -81,10 +63,6 @@ async function waitForEnabled(locator, label) {
   throw new Error(`${label} did not become enabled.`);
 }
 
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
-}
-
 function canonicalGraph(graph) {
   return {
     direction: graph.direction,
@@ -97,25 +75,9 @@ function canonicalGraph(graph) {
   };
 }
 
-async function toolbarBounds(page, width) {
-  await page.setViewportSize({ width, height: 820 });
-  const buttons = await page.locator('.topbar button:visible').evaluateAll((elements) => elements.map((button) => {
-    const rect = button.getBoundingClientRect();
-    return {
-      label: button.getAttribute('aria-label') || button.textContent.trim(),
-      left: rect.left,
-      right: rect.right,
-      height: rect.height,
-    };
-  }));
-  assert(buttons.every((button) => button.left >= 0 && button.right <= width && button.height >= 40),
-    `${width}px toolbar clipping: ${JSON.stringify(buttons)}`);
-  return buttons;
-}
-
 async function run() {
-  await fs.rm(evidenceDir, { recursive: true, force: true });
-  await fs.mkdir(evidenceDir, { recursive: true });
+  evidenceDir = await makeEvidenceDir('history-shortcuts');
+  mapPath = path.join(evidenceDir, 'history-fixture.mmd');
   await fs.writeFile(mapPath, fixtureSource(), 'utf8');
   await fs.writeFile(mapPath.replace(/\.mmd$/, '.view.json'), `${JSON.stringify({
     positions: {
@@ -130,24 +92,9 @@ async function run() {
     collapsedIds: [], viewport: { x: 0, y: 0, zoom: 1 },
   }, null, 2)}\n`, 'utf8');
 
-  port = await freePort();
-  origin = `http://127.0.0.1:${port}`;
-  server = spawn(process.execPath, ['server/index.mjs'], {
-    cwd: root,
-    env: {
-      ...process.env,
-      FINAL_SHAPE_MAP_PORT: String(port),
-      FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir,
-      FINAL_SHAPE_MAP_PATH: path.basename(mapPath),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  await waitForServer();
-
-  browser = await chromium.launch({
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    headless: true,
-  });
+  server = await startServer({ FINAL_SHAPE_MAP_DATA_ROOT: evidenceDir, FINAL_SHAPE_MAP_PATH: path.basename(mapPath) });
+  origin = server.origin;
+  browser = await launchBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 820 } });
   await context.addInitScript(() => localStorage.setItem('final-shape-map-workflow-mode', 'false'));
   const page = await context.newPage();
@@ -232,7 +179,8 @@ async function run() {
   await page.getByTestId('node-c').click();
   await page.getByTestId('properties-button').click();
   await page.getByTestId('rename-input').fill('C 수정');
-  await page.getByRole('button', { name: '저장', exact: true }).click();
+  // The inspector has two 저장 buttons: the name form and the detail form.
+  await page.locator('form', { has: page.getByTestId('rename-input') }).getByRole('button', { name: '저장', exact: true }).click();
   await waitForSnapshot(
     (current) => current.graph.nodes.find((node) => node.id === 'c')?.label === 'C 수정',
     'ordinary rename',
@@ -258,11 +206,6 @@ async function run() {
     'ordinary rename final restore',
   );
 
-  const toolbar768 = await toolbarBounds(page, 768);
-  const toolbar390 = await toolbarBounds(page, 390);
-  const compactScreenshot = path.join(evidenceDir, 'toolbar-390.png');
-  await page.screenshot({ path: compactScreenshot, fullPage: true });
-
   const report = {
     fixture: { totalNodes: original.graph.nodes.length, selectedIds },
     deletion: {
@@ -280,11 +223,7 @@ async function run() {
       exactGraphRestored: true,
       positionsRestored: ['a', 'a1', 'a2', 'b', 'b1'],
     },
-    responsiveToolbar: { 768: toolbar768, 390: toolbar390 },
-    screenshots: [
-      path.relative(root, selectionScreenshot),
-      path.relative(root, compactScreenshot),
-    ],
+    screenshots: [path.relative(root, selectionScreenshot)],
   };
   await fs.writeFile(path.join(evidenceDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -294,9 +233,5 @@ try {
   await run();
 } finally {
   await browser?.close().catch(() => {});
-  if (server && server.exitCode === null) {
-    const exited = new Promise((resolve) => server.once('exit', resolve));
-    server.kill('SIGTERM');
-    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2000))]);
-  }
+  await server?.stop().catch(() => {});
 }

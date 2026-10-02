@@ -9,17 +9,17 @@
  * in the repository and that `map check` and `map format` still pass.
  * Run `npm run build` first. Screenshots go to test-results/flow-collab/.
  *
- *   FLOW_COLLAB_PORT=4361 node scripts/flow-collab-acceptance.mjs
+ *   node scripts/flow-collab-acceptance.mjs   (a free port; FLOW_COLLAB_PORT pins one)
  */
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { freePort, launchBrowser } from './support/browser-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.env.FLOW_COLLAB_PORT || 4361);
+const port = Number(process.env.FLOW_COLLAB_PORT) || await freePort();
 const origin = `http://127.0.0.1:${port}`;
 const shots = path.join(root, 'test-results', 'flow-collab');
 const FLOW = '02-lending.mmd';
@@ -41,14 +41,6 @@ async function until(fn, { timeout = 8_000, message = 'timed out' } = {}) {
     if (Date.now() > deadline) throw new Error(message);
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
-}
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundled = chromium.executablePath();
-  const match = bundled.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundled;
-  const candidate = path.join(match[1], `chromium_headless_shell-${match[2]}`, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
-  return fs.access(candidate).then(() => candidate, () => bundled);
 }
 async function startServer(environment) {
   const child = spawn(process.execPath, ['server/index.mjs'], { cwd: root, env: { ...process.env, FINAL_SHAPE_MAP_PORT: String(port), ...environment }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -103,7 +95,9 @@ async function fullLoop(page, project) {
   await page.getByTestId('fm-canvas').click({ position: { x: 30, y: 30 } });
   await page.keyboard.press('Meta+z');
   await until(async () => (await readFlow(project)) === before, { message: 'undo did not restore the file' });
-  check('undo removes the memo and restores the file byte for byte', !(await stateOf(page, 'reader_search')));
+  // The file is restored before the page receives the new snapshot; wait for the card too.
+  await until(async () => !(await stateOf(page, 'reader_search')), { message: 'undo did not clear the memo color' });
+  check('undo removes the memo and restores the file byte for byte', (await readFlow(project)) === before && !(await stateOf(page, 'reader_search')));
   await page.keyboard.press('Meta+Shift+z');
   await until(async () => (await stateOf(page, 'reader_search')) === 'concern', { message: 'redo did not restore the memo' });
   check('redo restores the same memo the service wrote', (await readFlow(project)).includes('검색 결과 순서가 뒤죽박죽이에요'));
@@ -168,6 +162,8 @@ async function fullLoop(page, project) {
   await page.getByTestId('fm-step-label').fill('내 책 올리기');
   await page.getByTestId('fm-step-label').press('Enter');
   await until(async () => (await readFlow(project)).includes('내 책 올리기'));
+  // Judge the card only after it shows the edit, so a stale card cannot pass.
+  await until(async () => (await page.getByTestId('fm-step-owner_list').textContent()).includes('내 책 올리기'), { message: 'the edited label did not appear' });
   check('a live edit after a turn is not blue', !(await stateOf(page, 'owner_list')));
   await page.getByTestId('fm-open-turns').click();
   await page.getByTestId('fm-turn-title').fill('요청 확인 다듬기');
@@ -256,7 +252,7 @@ async function main() {
   git(project, 'init', '-q', '-b', 'main');
   git(project, 'add', '.');
   git(project, 'commit', '-q', '-m', 'Sample maps');
-  const browser = await chromium.launch({ executablePath: await headlessShellPath() });
+  const browser = await launchBrowser();
   const pageErrors = [];
   let server;
   try {
