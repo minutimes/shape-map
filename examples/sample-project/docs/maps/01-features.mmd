@@ -1,0 +1,42 @@
+flowchart LR
+  %% mlc-format: 1
+  %% sm-map: {"kind":"features","title":"동네 책장 기능"}
+  app(["동네 책장"])
+  find["책 찾기"]
+  search["검색"]
+  alert["입고 알림"]
+  lend["대여"]
+  request["대여 신청"]
+  deposit["보증금"]
+  returning["반납"]
+  owners["책 주인"]
+  listing["책 올리기"]
+  payout["정산"]
+  ops["운영"]
+  catalog["도서 정보 연동"]
+
+  app --> find
+  find --> search
+  find --> alert
+  app --> lend
+  lend --> request
+  lend --> deposit
+  lend --> returning
+  app --> owners
+  owners --> listing
+  owners --> payout
+  app --> ops
+  ops --> catalog
+
+  classDef root fill:#28282C,stroke:#28282C,color:#FFFFFF,stroke-width:1px
+  classDef area fill:#FFFFFF,stroke:#D9D9DE,color:#28282C,stroke-width:1px
+  classDef feature fill:#FFFFFF,stroke:#E4E4E8,color:#28282C,stroke-width:1px
+  class app root
+  class find,lend,owners,ops area
+  class search,alert,request,deposit,returning,listing,payout,catalog feature
+
+  %% sm-block: search|{"summary":"책 제목이나 저자로 찾아요."}
+
+  %% mlc-legend: root|제품|제품 전체
+  %% mlc-legend: area|영역|기능 묶음
+  %% mlc-legend: feature|기능|하나의 기능
