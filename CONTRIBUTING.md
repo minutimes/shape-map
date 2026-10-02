@@ -14,7 +14,16 @@ and exercise its reachable states.
 
 ## Checks
 
-Run these from a clean `npm ci` before proposing a change:
+Run these in order before proposing a change. Start from `npm ci` in the
+checkout you are testing, including a worktree: tests that start the server need
+that checkout's own `node_modules`.
+
+```sh
+npm ci
+npm test
+npm run build
+npm run test:browser
+```
 
 | Command | What it proves | Time |
 | --- | --- | --- |
@@ -43,6 +52,7 @@ The browser checks need headless Chromium once per machine:
 | `project-shell` | Project list, map tabs, editing a feature, read-only maps, live additions, address history, single-map mode. |
 | `map-create` | Creating the first and further maps from the app; only the new `.mmd` files appear and pass `map check`. |
 | `flow-project` | User and system flows through the real server: edits, undo byte for byte, live disk edits, conflicts, source errors. |
+| `flow-collab` | Memos, proposals, review, turns, colors, the AI handoff, and step–feature links on flow maps; only map files change. |
 | `flow` | The flow canvas on its development harness: lanes, tags, arrows, drag-to-connect, keyboard, a 200-step map. |
 | `hierarchy-editor` | The detailed editor (`?editor=1`): editing, keyboard creation, copy/cut/paste, folding, restart persistence, external and invalid source, conflicts, toolbar at three widths. |
 | `history-shortcuts` | Undo and redo shortcuts restore the exact graph and positions after deleting, and after renaming. |

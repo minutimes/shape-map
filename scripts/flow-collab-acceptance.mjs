@@ -9,17 +9,17 @@
  * in the repository and that `map check` and `map format` still pass.
  * Run `npm run build` first. Screenshots go to test-results/flow-collab/.
  *
- *   FLOW_COLLAB_PORT=4361 node scripts/flow-collab-acceptance.mjs
+ *   node scripts/flow-collab-acceptance.mjs   (a free port; FLOW_COLLAB_PORT pins one)
  */
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { freePort, launchBrowser } from './support/browser-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = Number(process.env.FLOW_COLLAB_PORT || 4361);
+const port = Number(process.env.FLOW_COLLAB_PORT) || await freePort();
 const origin = `http://127.0.0.1:${port}`;
 const shots = path.join(root, 'test-results', 'flow-collab');
 const FLOW = '02-lending.mmd';
@@ -41,14 +41,6 @@ async function until(fn, { timeout = 8_000, message = 'timed out' } = {}) {
     if (Date.now() > deadline) throw new Error(message);
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
-}
-async function headlessShellPath() {
-  if (process.env.PLAYWRIGHT_CHROME_PATH) return process.env.PLAYWRIGHT_CHROME_PATH;
-  const bundled = chromium.executablePath();
-  const match = bundled.match(/^(.*)\/chromium-(\d+)\//);
-  if (!match) return bundled;
-  const candidate = path.join(match[1], `chromium_headless_shell-${match[2]}`, 'chrome-headless-shell-mac-arm64', 'chrome-headless-shell');
-  return fs.access(candidate).then(() => candidate, () => bundled);
 }
 async function startServer(environment) {
   const child = spawn(process.execPath, ['server/index.mjs'], { cwd: root, env: { ...process.env, FINAL_SHAPE_MAP_PORT: String(port), ...environment }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -256,7 +248,7 @@ async function main() {
   git(project, 'init', '-q', '-b', 'main');
   git(project, 'add', '.');
   git(project, 'commit', '-q', '-m', 'Sample maps');
-  const browser = await chromium.launch({ executablePath: await headlessShellPath() });
+  const browser = await launchBrowser();
   const pageErrors = [];
   let server;
   try {

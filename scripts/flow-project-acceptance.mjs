@@ -238,8 +238,7 @@ async function run() {
     await screenshot(page, 'shell-invalid-1440', 'The file broke after opening: banner with its line, last good picture kept.');
     await fs.writeFile(lendingFile, good);
     await until(async () => !(await page.getByTestId('fm-invalid-banner').count()), { timeout: 10000, message: 'banner did not clear' });
-    // The project list reports the map editable again on its own event, a moment after the map itself.
-    check('fixing the file resumes editing', await until(async () => await page.getByTestId('fm-undo').count() === 1, { message: 'editing did not resume' }));
+    check('fixing the file resumes editing', await page.getByTestId('fm-undo').count() === 1);
 
     // The system flow tab.
     await page.getByRole('button', { name: /^시스템 플로우/ }).click();
