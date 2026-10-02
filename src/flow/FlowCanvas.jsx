@@ -147,7 +147,7 @@ function landingFor(layout, id, point) {
   return { card, band, spot, changesLane: band.id !== card.band, placement: placementFor(layout, band, spot) };
 }
 
-export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane,
+export default function FlowCanvas({ graph, layout, words, storageKey, emphasis, selection, focusLane, editable, revealId, stepStates, onSelect, onConnect, onAddNext, onInsert, onAddInLane, onSelectLane, onFocusLane, onAddLane,
   placements = null, canPlace = false, previewLayout = null, onPlace = null, onResetPlacements = null }) {
   const canvasRef = useRef(null);
   const flow = useReactFlow();
@@ -231,7 +231,7 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
         selected: card.id === selectedStep, draggable: canPlace && (fine || card.id === selectedStep), connectable: editable, ariaLabel: `${card.step.label} 단계`,
         ...(moving ? { zIndex: 1000, className: 'is-moving' } : {}),
         data: { step: card.step, card, point: FLOW_METRICS.decisionPoint, editable, columns, emphasis: emphasis?.steps.get(card.id) ?? null,
-          tags: (card.step.tags || []).map((id) => tagsById.get(id)).filter(Boolean), onAddNext,
+          tags: (card.step.tags || []).map((id) => tagsById.get(id)).filter(Boolean), onAddNext, state: stepStates?.get(card.id) ?? null,
           placed: canPlace && Boolean(card.placed), onResetPlacement: resetOne },
       };
     });
@@ -250,7 +250,7 @@ export default function FlowCanvas({ graph, layout, words, storageKey, emphasis,
         data: { laneId: band.laneId, text: '첫 단계 추가', onAdd: onAddInLane } });
     }
     return result;
-  }, [shown, layout, move, landing, selectedStep, editable, canPlace, fine, emphasis, tagsById, onAddNext, onAddInLane, columns, resetOne, graph.lanes, words.shared]);
+  }, [shown, layout, move, landing, selectedStep, editable, canPlace, fine, emphasis, tagsById, onAddNext, onAddInLane, columns, resetOne, graph.lanes, words.shared, stepStates]);
 
   const labelOf = useMemo(() => new Map(graph.steps.map((step) => [step.id, step.label])), [graph.steps]);
   const edges = useMemo(() => shown.arrows.map((arrow) => ({

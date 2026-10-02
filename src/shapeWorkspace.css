@@ -646,3 +646,4 @@
   .sm-bottom-tools { left: 9px; right: 9px; gap: 6px; }
   .sm-studio .react-flow__minimap { bottom: 67px; right: 9px; }
 }
+.sm-flow-links > button > span small { display: block; margin-top: 2px; color: #a3a3ae; font-size: 10px; }

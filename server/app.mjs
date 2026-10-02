@@ -1,7 +1,8 @@
 import express from 'express';
 import { MlcError, validationError } from '../lib/errors.mjs';
 import { readRepository } from '../lib/repository.mjs';
-import { discussionBrief } from '../lib/discussion.mjs';
+import { discussionBrief, flowDiscussionBrief } from '../lib/discussion.mjs';
+import { FLOW_KINDS } from '../lib/flowMap.mjs';
 import { assertKind } from '../lib/mapSource.mjs';
 import { mapNotFound, projectNotFound } from '../lib/workspace.mjs';
 
@@ -75,6 +76,31 @@ export function createApiApp(store, { workspace = null } = {}) {
     }
   });
 
+  app.get('/api/project/links', async (request, response, next) => {
+    try {
+      if (!workspace) throw projectNotFound();
+      response.json(await workspace.projectLinks(request.query.project));
+    } catch (error) { next(error); }
+  });
+
+  /** A features brief, or a flow brief that names the features its steps link to. */
+  async function brief(selected, focus, request) {
+    const snapshot = await selected.getFreshSnapshot();
+    assertKind(snapshot, ['features', ...FLOW_KINDS], 'The brief route');
+    if (!FLOW_KINDS.includes(snapshot.kind)) return discussionBrief(snapshot, focus, request);
+    const labels = new Map();
+    const known = new Set();
+    if (workspace && selected.project?.key !== undefined) {
+      const { features } = await workspace.projectLinks(selected.project.key);
+      for (const map of features) {
+        known.add(map.file);
+        for (const node of map.nodes) labels.set(`${map.file}#${node.id}`, node.label);
+      }
+    }
+    const featureLabel = (map, id) => labels.get(`${map}#${id}`) ?? (known.has(map) || workspace ? null : undefined);
+    return flowDiscussionBrief(snapshot, focus, request, { featureLabel });
+  }
+
   // Creating a map: a starter file in the project's docs/maps (see docs/API.md "Projects").
   app.post('/api/project/maps', async (request, response, next) => {
     try {
@@ -106,10 +132,8 @@ export function createApiApp(store, { workspace = null } = {}) {
   app.get('/api/brief', async (request, response, next) => {
     try {
       const focus = request.query.focus;
-      if (focus !== undefined && (typeof focus !== 'string' || !focus)) throw validationError('focus must be a feature ID.');
-      const snapshot = await (await mapStore(request)).getFreshSnapshot();
-      assertKind(snapshot, ['features'], 'The brief route');
-      response.json(discussionBrief(snapshot, focus));
+      if (focus !== undefined && (typeof focus !== 'string' || !focus)) throw validationError('focus must be a feature or step ID.');
+      response.json(await brief(await mapStore(request), focus));
     }
     catch (error) { next(error); }
   });
@@ -117,12 +141,10 @@ export function createApiApp(store, { workspace = null } = {}) {
     try {
       const selected = await mapStore(request);
       const { focus, problem = '', purpose = '', successCriteria = '', approved = false } = request.body || {};
-      if (focus !== undefined && focus !== null && (typeof focus !== 'string' || !focus)) throw validationError('focus must be a feature ID.');
+      if (focus !== undefined && focus !== null && (typeof focus !== 'string' || !focus)) throw validationError('focus must be a feature or step ID.');
       if ([problem, purpose, successCriteria].some((value) => typeof value !== 'string' || value.length > 4000) || typeof approved !== 'boolean') throw validationError('Invalid discussion request.');
       if (approved && (!problem.trim() || !successCriteria.trim())) throw validationError('An approved request needs a problem and success criteria.');
-      const snapshot = await selected.getFreshSnapshot();
-      assertKind(snapshot, ['features'], 'The brief route');
-      response.json(discussionBrief(snapshot, focus, { problem, purpose, successCriteria, approved }));
+      response.json(await brief(selected, focus ?? undefined, { problem, purpose, successCriteria, approved }));
     } catch (error) { next(error); }
   });
   app.get('/api/subtree/:id', async (request, response, next) => {

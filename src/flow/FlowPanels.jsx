@@ -8,8 +8,9 @@ import { DraftField, PanelSection, Segmented } from './FlowFields.jsx';
 import { TagChip } from './FlowElements.jsx';
 import FlowIcon from './FlowIcon.jsx';
 import { draftKey } from './flowDrafts.js';
+import { CommentsTab, FeaturesTab, ProposalTab, StepStatus } from './FlowCollab.jsx';
 
-function PanelHeader({ eyebrow, title, onClose }) {
+export function PanelHeader({ eyebrow, title, onClose }) {
   return <header className="fm-panel__header">
     <div><span className="fm-panel__eyebrow">{eyebrow}</span><h2 title={title}>{title}</h2></div>
     <button type="button" className="fm-icon-button" aria-label="닫기" title="닫기 (Esc)" onClick={onClose}><FlowIcon name="close" size={15} /></button>
@@ -40,7 +41,30 @@ function Confirm({ text, action, onConfirm, onCancel }) {
   </div>;
 }
 
-export function StepPanel({ step, graph, words, editable, act, focusLabel }) {
+const STEP_TABS = [['content', '내용'], ['comments', '메모'], ['proposal', '수정안'], ['features', '기능']];
+
+/** A step's content, memos, proposal, and feature links, with its color and review on top. */
+export function StepPanel({ step, graph, words, editable, act, focusLabel, state, links, tab = 'content', onTab }) {
+  const [seed, setSeed] = useState(null);
+  const count = { comments: (step.comments || []).filter((comment) => !comment.resolved).length, features: (step.features || []).length, proposal: step.proposal !== undefined ? '•' : 0 };
+  return <>
+    <PanelHeader eyebrow={`단계 · ${laneTitle(graph, step.lane, words.shared)}`} title={step.label} onClose={act.close} />
+    {state && <StepStatus step={step} state={state} editable={editable} act={act} />}
+    <div className="fm-tabs" role="tablist" aria-label="단계 정보">
+      {STEP_TABS.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`fm-tab-${id}`} onClick={() => onTab(id)}>
+        {label}{count[id] ? <span className={`fm-tabs__count${id === 'proposal' ? ' is-planned' : ''}`}>{count[id]}</span> : null}</button>)}
+    </div>
+    {tab === 'content' && <StepContent step={step} graph={graph} words={words} editable={editable} act={act} focusLabel={focusLabel} />}
+    {tab !== 'content' && <div className="fm-panel__body" role="tabpanel">
+      {tab === 'comments' && <CommentsTab step={step} editable={editable} act={act} onToProposal={(text) => { setSeed(text); onTab('proposal'); }} />}
+      {tab === 'proposal' && <ProposalTab step={step} editable={editable} act={act} seed={seed} onSeedUsed={() => setSeed(null)} />}
+      {tab === 'features' && <FeaturesTab step={step} editable={editable} act={act} links={links} />}
+    </div>}
+    <footer className="fm-panel__footer"><button type="button" className="fm-button fm-button--small" onClick={() => act.openBrief(step.id)} data-testid="fm-step-brief"><FlowIcon name="mail" size={13} />AI에 전달</button></footer>
+  </>;
+}
+
+function StepContent({ step, graph, words, editable, act, focusLabel }) {
   const relations = useMemo(() => stepRelations(graph, step.id), [graph, step.id]);
   const [target, setTarget] = useState('');
   const [style, setStyle] = useState('next');
@@ -49,8 +73,7 @@ export function StepPanel({ step, graph, words, editable, act, focusLabel }) {
   const options = connectableTargets(graph, step.id);
   useEffect(() => { setTarget(''); }, [step.id]);
   return <>
-    <PanelHeader eyebrow={`단계 · ${laneTitle(graph, step.lane, words.shared)}`} title={step.label} onClose={act.close} />
-    <div className="fm-panel__body">
+    <div className="fm-panel__body" role="tabpanel">
       <DraftField key={`${step.id}-label`} store={act.drafts} draftKey={draftKey('step', step.id, 'label')} label="이름" value={step.label} limit={TEXT_LIMITS.step} disabled={!editable} autoFocus={focusLabel} testId="fm-step-label"
         clean={(text) => cleanLabel(text)} onCommit={(label) => act.send({ type: 'updateStep', id: step.id, label }, '단계 이름 바꾸기')} />
       <DraftField key={`${step.id}-summary`} store={act.drafts} draftKey={draftKey('step', step.id, 'summary')} label="설명" hint="카드에는 첫 줄만 보여요" value={step.summary || ''} multiline limit={TEXT_LIMITS.summary} allowEmpty disabled={!editable}
