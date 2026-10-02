@@ -67,28 +67,45 @@ function ProjectHome({ initial, onOpen }) {
     document.addEventListener('visibilitychange', refresh);
     return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
   }, []);
+  // A repository and its worktrees stay together; those with maps come first.
+  const groups = [];
+  for (const project of projects) {
+    const last = groups.at(-1);
+    if (last && last[0].name === project.name) last.push(project);
+    else groups.push([project]);
+  }
+  const mapped = groups.filter((group) => group.some((project) => project.mapCount));
+  const quiet = groups.filter((group) => !group.some((project) => project.mapCount));
   return <main className="sm-home">
     <header className="sm-home__bar"><span className="sm-logo" /><span className="sm-home__brand">shape map<span className="sm-brand__dot">.</span></span></header>
     <section className="sm-home__body" aria-labelledby="sm-home-title">
       <h1 id="sm-home-title">프로젝트</h1>
       <p className="sm-home__lead">지도를 볼 제품을 고르세요.</p>
-      {projects.length ? <ul className="sm-project-list">
-        {projects.map((project, index) => {
-          const nested = project.worktree && projects[index - 1]?.name === project.name;
-          return <li key={project.key} className={`${project.mapCount ? '' : 'is-quiet'}${nested ? ' is-nested' : ''}`}>
-            <button onClick={() => onOpen(project.key)}>
-              <span className="sm-project-glyph" aria-hidden="true">{nested ? <ShapeIcon name="branch" size={14} /> : <ShapeIcon name="grid" size={14} />}</span>
-              <span className="sm-project-text">
-                <span className="sm-project-line"><strong>{project.name}</strong>{project.worktree && project.branch && <span className="sm-branch" title="작업 갈래">{project.branch}</span>}</span>
-                <small>{project.mapCount ? `지도 ${project.mapCount}개` : '아직 지도가 없어요 · docs/maps 폴더에 .mmd 파일을 두면 보여요'}</small>
-              </span>
-              <ShapeIcon name="arrow" size={13} className="sm-project-go" />
-            </button>
-          </li>;
-        })}
-      </ul> : <p className="sm-home__empty">작업 폴더에 프로젝트가 없어요.</p>}
+      {projects.length ? <>
+        {mapped.length
+          ? <ul className="sm-project-list">{mapped.flatMap((group) => group.map((project, index) => <ProjectRow key={project.key} project={project} nested={index > 0 && project.worktree} onOpen={onOpen} />))}</ul>
+          : <p className="sm-home__empty">아직 지도가 있는 프로젝트가 없어요. 레포의 docs/maps 폴더에 .mmd 파일을 두면 여기에 보여요.</p>}
+        {quiet.length > 0 && <details className="sm-project-more" open={!mapped.length}>
+          <summary>지도가 아직 없는 프로젝트 {quiet.length}개</summary>
+          <p className="sm-project-more__hint">레포의 docs/maps 폴더에 .mmd 파일을 두면 위로 올라와요.</p>
+          <ul className="sm-project-list">{quiet.flatMap((group) => group.map((project, index) => <ProjectRow key={project.key} project={project} nested={index > 0 && project.worktree} onOpen={onOpen} />))}</ul>
+        </details>}
+      </> : <p className="sm-home__empty">작업 폴더에 프로젝트가 없어요.</p>}
     </section>
   </main>;
+}
+
+function ProjectRow({ project, nested, onOpen }) {
+  return <li className={`${project.mapCount ? '' : 'is-quiet'}${nested ? ' is-nested' : ''}`}>
+    <button onClick={() => onOpen(project.key)}>
+      <span className="sm-project-glyph" aria-hidden="true">{nested ? <ShapeIcon name="branch" size={14} /> : <ShapeIcon name="grid" size={14} />}</span>
+      <span className="sm-project-text">
+        <span className="sm-project-line"><strong>{project.name}</strong>{project.worktree && project.branch && <span className="sm-branch" title="작업 갈래">{project.branch}</span>}</span>
+        <small>{project.mapCount ? `지도 ${project.mapCount}개` : '아직 지도가 없어요'}</small>
+      </span>
+      <ShapeIcon name="arrow" size={13} className="sm-project-go" />
+    </button>
+  </li>;
 }
 
 function ProjectView({ projectKey, mapFile, navigate }) {

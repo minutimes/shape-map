@@ -124,7 +124,10 @@ async function main() {
     const rows = await page.locator('.sm-project-list li').evaluateAll((items) => items.map((item) => ({ text: item.textContent, quiet: item.classList.contains('is-quiet'), nested: item.classList.contains('is-nested') })));
     check('home lists projects', rows.length >= 3, rows.map((row) => row.text).join(' | '));
     check('worktree shows its branch under its repository', rows.some((row) => row.nested && row.text.includes('rooms-rework') && row.text.startsWith('bookshelf')));
-    check('project without maps is quiet with a hint', rows.some((row) => row.quiet && row.text.includes('notes-app') && row.text.includes('docs/maps')));
+    const quietSection = await page.locator('.sm-project-more').evaluate((section) => ({ text: section.textContent, open: section.open })).catch(() => null);
+    check('projects without maps are folded below with one hint', rows.some((row) => row.quiet && row.text.includes('notes-app'))
+      && quietSection && !quietSection.open && quietSection.text.includes('docs/maps'), JSON.stringify(quietSection));
+    check('projects with maps come first', rows.findIndex((row) => row.quiet) > rows.findIndex((row) => row.text.includes('bookshelf')));
     await screenshot(page, 'home-1440');
 
     // Project view: tabs in order, with counts; the first map opens.
