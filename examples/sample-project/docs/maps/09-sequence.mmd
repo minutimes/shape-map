@@ -1,0 +1,8 @@
+sequenceDiagram
+  participant R as 빌리는 사람
+  participant P as 플랫폼
+  participant O as 책 주인
+  R->>P: 대여 요청
+  P->>O: 요청 전달
+  O-->>P: 수락
+  P-->>R: 보증금 안내
