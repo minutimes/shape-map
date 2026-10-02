@@ -365,7 +365,7 @@ describe('flow collaboration routes', () => {
     const brief = (await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ focus: 'reader_search', problem: '못 찾아요', successCriteria: '찾는다' }).expect(200)).body;
     expect(brief.text).toContain('docs/maps/01-features.mmd [search] 검색');
     expect(brief.text).toContain('docs/maps/01-features.mmd [retired] (찾을 수 없는 기능)');
-    expect((await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ focus: 'nope' }).expect(422)).body.message).toMatch(/step does not exist/);
+    expect((await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ focus: 'nope' }).expect(422)).body.message).toMatch(/step or lane does not exist/);
     expect((await request(app).post(`/api/brief?${q('02-lending.mmd')}`).send({ approved: true }).expect(422)).body.message).toMatch(/approved request/);
     expect((await request(app).get('/api/project/links?project=../x').expect(404)).body.code).toBe('project_not_found');
   });

@@ -297,8 +297,8 @@ exact current revision.
 | `deleteTag` | `id`; removes the tag from every lane and step |
 | `setMapHeader` | optional `title` and `description` (`null` removes) |
 | `replaceSource` | `source`: complete text that must parse as a flow map (either flow kind; changing the kind moves the map to the other tab); used by the source editor and by undo and redo |
-| `addComment` | `id` (step), `body`, `kind` (`note`, `concern`, or `change`), `author`; the service adds the comment `id` and `createdAt` |
-| `resolveComment` | `id`, `commentId`, optional `resolved` (default `true`) |
+| `addComment` | `id` (step or lane), `body`, `kind` (`note`, `concern`, or `change`), `author`; the service adds the comment `id` and `createdAt` |
+| `resolveComment` | `id` (step or lane), `commentId`, optional `resolved` (default `true`) |
 | `setProposal` | `id`, `proposal` (`{reason?, purpose?, logic?, successCriteria?}`) or `null` to withdraw it |
 | `setBlock` | `id`, `block: { status }`; `verified` records a review with the service's time and the step's current fingerprint, any other status removes the review, and `neutral` removes the status |
 | `createTurn` | `title`, optional `summary`; the service adds the turn `id`, `number`, `createdAt`, the current `revision`, and the snapshot |
@@ -324,7 +324,8 @@ when both are removed. Unknown fields, such as `kind`, are rejected.
 ### Flow discussion and feature links
 
 `GET /api/brief` and `POST /api/brief` accept a flow map as well. `focus` is then a
-step ID, and an unknown step returns 422. The request fields and approval rules are
+step or lane ID, and an unknown ID returns 422. Lanes with new unresolved memos are
+listed after the steps; a lane focus lists that lane's memos, description, and steps. The request fields and approval rules are
 the same as for features maps. The text names the canonical file and revision,
 then only the steps that changed since the last turn (with the changed parts),
 were added, carry a proposal that changed, or have new unresolved memos, at most
