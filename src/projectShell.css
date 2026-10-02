@@ -57,6 +57,11 @@
 .sm-project-list .is-quiet button { border-style: dashed; background: transparent; }
 .sm-project-list .is-quiet strong { color: #6e6e77; font-weight: 600; }
 .sm-project-list .is-quiet small { color: #9a9aa3; }
+.sm-project-more { margin-top: 18px; }
+.sm-project-more summary { cursor: pointer; width: fit-content; padding: 4px 2px; color: var(--sm-muted); font-size: 12px; font-weight: 600; }
+.sm-project-more summary:hover { color: var(--sm-ink); }
+.sm-project-more summary:focus-visible { outline: 2px solid #386fb2; outline-offset: 2px; border-radius: 4px; }
+.sm-project-more__hint { margin: 2px 2px 10px; color: #9a9aa3; font-size: 12px; }
 
 /* A map shown without editing. */
 .sm-readonly { display: flex; flex-direction: column; min-height: 0; height: 100%; background: #f5f5f7; }
