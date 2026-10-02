@@ -7,4 +7,5 @@
 - Never manufacture human review or development history. Blue is a recorded turn difference.
 - Keep visible language understandable to people who do not develop software.
 - Use focused tests for persistence, concurrency, or interaction changes. Verify visible UI in a browser.
-- Build with `npm run build` and run `npm test` before proposing a release.
+- Before proposing a change, run `npm ci`, `npm test`, `npm run build`, and `npm run test:browser`
+  (see CONTRIBUTING.md "Checks"). Every check must pass and mean something; fix or remove a stale one.
