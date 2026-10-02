@@ -3,7 +3,8 @@ import { ReactFlowProvider } from '@xyflow/react';
 import ShapeWorkspace from './ShapeWorkspace.jsx';
 import { ShapeIcon } from './ShapeNode.jsx';
 import { createMapApi, readJson } from './api.js';
-import { FLOW_MAP_KINDS, MAP_KIND_ORDER, mapKindLabel } from './mapKinds.js';
+import { CREATABLE_MAP_KINDS, FLOW_MAP_KINDS, MAP_KIND_ORDER, mapKindLabel } from './mapKinds.js';
+import { MapInfoDialog, NewMapDialog } from './MapDialogs.jsx';
 import './shapeWorkspace.css';
 import './projectShell.css';
 
@@ -84,10 +85,10 @@ function ProjectHome({ initial, onOpen }) {
       {projects.length ? <>
         {mapped.length
           ? <ul className="sm-project-list">{mapped.flatMap((group) => group.map((project, index) => <ProjectRow key={project.key} project={project} nested={index > 0 && project.worktree} onOpen={onOpen} />))}</ul>
-          : <p className="sm-home__empty">아직 지도가 있는 프로젝트가 없어요. 레포의 docs/maps 폴더에 .mmd 파일을 두면 여기에 보여요.</p>}
+          : <p className="sm-home__empty">아직 지도가 있는 프로젝트가 없어요. 프로젝트를 열면 첫 지도를 만들 수 있어요.</p>}
         {quiet.length > 0 && <details className="sm-project-more" open={!mapped.length}>
           <summary>지도가 아직 없는 프로젝트 {quiet.length}개</summary>
-          <p className="sm-project-more__hint">레포의 docs/maps 폴더에 .mmd 파일을 두면 위로 올라와요.</p>
+          <p className="sm-project-more__hint">열어서 첫 지도를 만들면 위로 올라와요. 지도는 docs/maps 폴더에 저장돼요.</p>
           <ul className="sm-project-list">{quiet.flatMap((group) => group.map((project, index) => <ProjectRow key={project.key} project={project} nested={index > 0 && project.worktree} onOpen={onOpen} />))}</ul>
         </details>}
       </> : <p className="sm-home__empty">작업 폴더에 프로젝트가 없어요.</p>}
@@ -110,6 +111,7 @@ function ProjectRow({ project, nested, onOpen }) {
 
 function ProjectView({ projectKey, mapFile, navigate }) {
   const [state, setState] = useState({ status: 'loading', project: null, maps: [] });
+  const [dialog, setDialog] = useState(null);
   const lastByKind = useRef({});
   const editableLatch = useRef({ key: null, editable: false });
 
@@ -157,6 +159,19 @@ function ProjectView({ projectKey, mapFile, navigate }) {
   const projectName = state.project?.name || projectKey;
   useEffect(() => { document.title = current ? `${current.title} · ${projectName}` : `${projectName} · Shape map`; }, [current?.title, projectName]);
 
+  const reloadMaps = useCallback(() => {
+    readJson(`/api/project?${new URLSearchParams({ project: projectKey })}`)
+      .then((body) => setState((current) => ({ ...current, status: 'ready', project: body.project, maps: body.maps })))
+      .catch(() => {});
+  }, [projectKey]);
+  const onCreated = ({ project, maps, map }) => {
+    setDialog(null);
+    setState((current) => ({ ...current, status: 'ready', project, maps }));
+    if (map) navigate({ project: projectKey, map: map.file });
+  };
+  const newMap = (first = false) => setDialog({ mode: 'create', first,
+    kind: CREATABLE_MAP_KINDS.includes(activeKind) ? activeKind : 'features' });
+
   const openKind = (kind) => {
     const group = groups.find((item) => item.kind === kind);
     const remembered = group.maps.find((map) => map.file === lastByKind.current[kind]);
@@ -167,7 +182,10 @@ function ProjectView({ projectKey, mapFile, navigate }) {
   if (state.status === 'loading') content = <Loading />;
   else if (state.status === 'missing') content = <EmptyState title="이 프로젝트를 찾을 수 없어요." text="폴더가 옮겨졌거나 이름이 바뀌었을 수 있어요." action={<button className="sm-button" onClick={() => navigate({})}>프로젝트 목록</button>} />;
   else if (state.status === 'offline') content = <EmptyState title="프로젝트를 불러오지 못했어요." action={<button className="sm-button" onClick={() => window.location.reload()}>다시 연결</button>} />;
-  else if (!state.maps.length) content = <EmptyState title="이 프로젝트에는 아직 지도가 없어요." text="docs/maps 폴더에 지도 파일(.mmd)을 두면 바로 여기에 보여요." />;
+  else if (!state.maps.length) {
+    content = <EmptyState title="이 프로젝트에는 아직 지도가 없어요." text="기능 계통도나 플로우를 하나 만들어 시작해 보세요. 프로젝트의 docs/maps 폴더에 파일로 저장돼요."
+      action={<button className="sm-button sm-button--dark" onClick={() => newMap(true)}><ShapeIcon name="plus" size={14} />첫 지도 만들기</button>} />;
+  }
   else if (!current) content = mapFile ? <EmptyState title="이 지도를 찾을 수 없어요." text="파일이 옮겨지거나 지워졌을 수 있어요. 위에서 다른 지도를 골라 주세요." /> : <Loading />;
   else if (editable && current.kind === 'features') {
     content = <ShapeWorkspace key={mapKey} api={api} embedded title={showChips ? null : current.title} />;
@@ -193,10 +211,21 @@ function ProjectView({ projectKey, mapFile, navigate }) {
         {activeGroup.maps.map((map) => <button key={map.file} aria-current={map.file === current.file ? 'page' : undefined} title={map.description || map.title}
           onClick={() => navigate({ project: projectKey, map: map.file })}>{!map.editable && <span className="sm-chip-readonly" aria-label="보기 전용" />}{map.title}</button>)}
       </nav>}
+      {state.status === 'ready' && <div className="sm-shell-actions">
+        {/* Flow canvases edit their title right beside it; the feature canvas has no such place. */}
+        {current?.editable && !FLOW_MAP_KINDS.includes(current.kind) && <button type="button" className="sm-shell-action" onClick={() => setDialog({ mode: 'info' })} aria-label="지도 이름과 설명 바꾸기" title="지도 이름과 설명 바꾸기">
+          <ShapeIcon name="pencil" size={13} /><span>지도 정보</span></button>}
+        {state.maps.length > 0 && <button type="button" className="sm-shell-action" onClick={() => newMap()} aria-label="새 지도 만들기" title="새 지도 만들기">
+          <ShapeIcon name="plus" size={13} /><span>새 지도</span></button>}
+      </div>}
     </header>
     <div className="sm-shell-content">
       <ReactFlowProvider key={mapKey || 'none'}>{content}</ReactFlowProvider>
     </div>
+    {dialog?.mode === 'create' && <NewMapDialog projectKey={projectKey} projectName={projectName} initialKind={dialog.kind} first={dialog.first}
+      onClose={() => setDialog(null)} onCreated={onCreated} />}
+    {dialog?.mode === 'info' && current && api && <MapInfoDialog key={current.file} api={api} entry={current}
+      onClose={() => setDialog(null)} onSaved={() => { setDialog(null); reloadMaps(); }} />}
   </main>;
 }
 
