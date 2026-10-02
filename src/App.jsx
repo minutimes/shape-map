@@ -235,6 +235,8 @@ export default function App({ api = legacyMapApi }) {
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [referenceEditingId, setReferenceEditingId] = useState(null);
   const [positions, setPositions] = useState({});
+  // A released resize stays on screen while its save is in flight.
+  const [pendingResize, setPendingResize] = useState(null);
   const [flowNodes, setFlowNodes] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -991,12 +993,17 @@ export default function App({ api = legacyMapApi }) {
       undoView: { positions: positionsFor(changedIds, before.positions) },
       redoView: { positions: nextPositions },
     } : null;
-    await execute({
-      type: 'setNodeLayouts',
-      items: [{ id, layout: nextLayout }],
-    }, {
-      viewChange,
-    });
+    setPendingResize({ id, layout: nextLayout, positions: preview.positions });
+    try {
+      await execute({
+        type: 'setNodeLayouts',
+        items: [{ id, layout: nextLayout }],
+      }, {
+        viewChange,
+      });
+    } finally {
+      setPendingResize(null);
+    }
   }, [execute]);
 
   const updateNodeLayouts = useCallback(async (ids, draft) => {
@@ -1146,14 +1153,17 @@ export default function App({ api = legacyMapApi }) {
     const collapsed = new Set(snapshot.view?.collapsedIds || []);
     const hidden = hiddenNodeIds(rawNodes, collapsed);
     const visible = new Set(rawNodes.filter((node) => !hidden.has(node.id)).map((node) => node.id));
+    const shownPositions = pendingResize ? { ...positions, ...pendingResize.positions } : positions;
     const nodes = rawNodes
       .filter((node) => visible.has(node.id))
       .map((node) => {
-        const layout = resolveNodeLayout(node);
+        const layout = pendingResize?.id === node.id
+          ? resolveNodeLayout(node, pendingResize.layout)
+          : resolveNodeLayout(node);
         return {
           id: node.id,
           type: 'mapNode',
-          position: positions[node.id] || { x: 0, y: 0 },
+          position: shownPositions[node.id] || { x: 0, y: 0 },
           width: layout.width,
           ...(layout.mode === 'fixed' ? { height: layout.height } : {}),
           data: {
@@ -1171,7 +1181,7 @@ export default function App({ api = legacyMapApi }) {
           collapsed: collapsed.has(node.id),
           cut: clipboard?.mode === 'cut' && clipboard.rootId === node.id,
           editing: editingNodeId === node.id,
-          canvasPosition: positions[node.id] || { x: 0, y: 0 },
+          canvasPosition: shownPositions[node.id] || { x: 0, y: 0 },
           onToggleCollapse: toggleCollapse,
           onCopyKey: copyNodeKey,
           onRename: renameNode,
@@ -1196,7 +1206,7 @@ export default function App({ api = legacyMapApi }) {
         },
       }));
     return { nodes, edges };
-  }, [busy, clipboard, copyNodeKey, editingNodeId, editTask, focusWorkflow, inlineEditor, measureWorkflowHeader, onNodeResize, onNodeResizeCancel, onNodeResizeEnd, onNodeResizeStart, positions, renameNode, sections, setReferenceSection, snapshot, toggleCollapse, workflowMode, workflowFocusId, workflowMeasurements]);
+  }, [busy, clipboard, copyNodeKey, editingNodeId, editTask, focusWorkflow, inlineEditor, measureWorkflowHeader, onNodeResize, onNodeResizeCancel, onNodeResizeEnd, onNodeResizeStart, pendingResize, positions, renameNode, sections, setReferenceSection, snapshot, toggleCollapse, workflowMode, workflowFocusId, workflowMeasurements]);
 
   useLayoutEffect(() => {
     const selected = new Set(selectedIdsRef.current);
@@ -1411,6 +1421,10 @@ export default function App({ api = legacyMapApi }) {
     (_, viewport) => {
       clearTimeout(viewportTimerRef.current);
       const workflow = workflowModeRef.current;
+      // Restoring the saved camera on open is not a change; writing it back
+      // could overwrite a newer camera saved elsewhere in the meantime.
+      const saved = workflow ? snapshotRef.current?.view?.workflow?.viewport : snapshotRef.current?.view?.viewport;
+      if (saved && saved.x === viewport.x && saved.y === viewport.y && saved.zoom === viewport.zoom) return;
       viewportTimerRef.current = setTimeout(async () => {
         const current = snapshotRef.current;
         if (!current) return;
@@ -1829,7 +1843,7 @@ export default function App({ api = legacyMapApi }) {
           </div>
         </div>
         <div className="topbar__actions">
-          <a href={api.workspaceHref} className="quiet-button" style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}>제품 지도</a>
+          <a href={api.workspaceHref} className="quiet-button workspace-link" style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}>제품 지도</a>
           {workflowMode ? <InlineSaveStatus editor={inlineEditor} connection={connection} onCopy={writeClipboardText} /> : <span className={`sync-state sync-state--${connection}`} data-testid="connection-status">
             <span aria-hidden="true" />{connection === 'online' ? '동기화됨' : connection === 'offline' ? '연결 확인 중' : '연결 중'}
           </span>}
