@@ -4,7 +4,7 @@
 The editor deliberately supports a small Mermaid `flowchart` subset so every visual
 operation has an honest text round trip. A product repository can keep several
 maps of different kinds; see [Project maps](#project-maps) and
-[Journey maps](#journey-maps).
+[User flow maps](#user-flow-maps).
 
 ## Authoritative syntax
 
@@ -147,12 +147,12 @@ the folder can also hold notes for people.
 Each map names its kind in one header comment:
 
 ```text
-%% sm-map: {"kind":"journey","title":"방과 리그 동선","description":"사람들이 방과 리그를 오가는 길"}
+%% sm-map: {"kind":"user-flow","title":"방과 리그","description":"사람들이 방과 리그를 오가는 길"}
 ```
 
 | Field | Rule |
 | --- | --- |
-| `kind` | Required. `features` (기능 계통도) or `journey` (동선 지도). |
+| `kind` | Required. `features` (기능 계통도) or `user-flow` (유저 플로우). |
 | `title` | Optional, 1–80 characters. The map's name in Shape map. |
 | `description` | Optional, up to 400 characters. One line shown with the title. |
 
@@ -162,11 +162,11 @@ Without a header, a file in the v1 format above is a `features` map, so existing
 maps remain valid unchanged, and writers preserve the absence. Every other map
 needs a header.
 
-A `features` map follows the v1 hierarchy contract above. A `journey` map follows
-the [journey contract](#journey-maps). The default title is the root label of a
-`features` map and the file name without `.mmd` for a `journey` map.
+A `features` map follows the v1 hierarchy contract above. A `user-flow` map
+follows the [user flow contract](#user-flow-maps). The default title is the root
+label of a `features` map and the file name without `.mmd` for a `user-flow` map.
 
-Shape map shows one tab per kind, in this order: 기능 계통도, 동선 지도, then
+Shape map shows one tab per kind, in this order: 기능 계통도, 유저 플로우, then
 기타 그림. Within a tab, maps are ordered by file name, so a numeric prefix such
 as `01-rooms.mmd` sets their order.
 
@@ -179,9 +179,9 @@ without a restart.
 Shape map writes only the `.mmd` files that a person edits. Canvas state for
 project maps stays in Shape map's local state directory, never in the project.
 
-## Journey maps
+## User flow maps
 
-A journey map (동선 지도) shows how each kind of participant moves through a
+A user flow map (유저 플로우) shows how each kind of participant moves through a
 product: what they do and in what order, which way they choose, where they hand
 something to another participant, and what they exchange. Participants are not
 only paying customers. A lane can be a consumer, a provider, a data provider, an
@@ -189,7 +189,7 @@ operator, or an automated system.
 
 ```mermaid
 flowchart LR
-  %% sm-map: {"kind":"journey","title":"방 동선"}
+  %% sm-map: {"kind":"user-flow","title":"방 들어가기"}
   subgraph player["플레이어"]
     player_enter(["게임에 들어오기"])
     player_quick["빠른 참가 누르기"]
@@ -235,7 +235,7 @@ flowchart LR
 Each statement is on its own line; blank lines are allowed.
 
 - **Declaration.** Exactly one `flowchart LR` and exactly one `%% sm-map:` header
-  with `"kind":"journey"`.
+  with `"kind":"user-flow"`.
 - **Lanes (참여자 줄).** `subgraph ID["title"]`, the lane's steps, then `end`. A
   lane is one kind of participant. Lanes do not nest, and only step declarations
   may appear inside a lane. Lanes are shown top to bottom in declaration order.
@@ -261,7 +261,7 @@ Each statement is on its own line; blank lines are allowed.
   needs; Shape map shows them as chips and can highlight them. A tag may be
   defined without being used.
 - **Descriptions.** `%% sm-block: ID|{"summary":"text"}` on a step or lane. Only
-  `summary` is supported in journey maps.
+  `summary` is supported in user flow maps.
 
 Every other statement is rejected with its line number. This includes chained
 arrows (`A --> B --> C`), `&`, node declarations inside arrows, `style`,
@@ -277,15 +277,15 @@ arrows (`A --> B --> C`), `&`, node declarations inside arrows, `style`,
   cannot contain a double quote (`"`), because Mermaid cannot read it; use ‘ ’ or
   “ ” instead. Step labels have 1–200 characters, lane titles 1–80, arrow labels
   up to 120, and summaries up to 4,000. Shape map shows all text as plain text.
-- A journey map has at most 50 lanes, 2,000 steps, 4,000 arrows, and 64 tags. A
+- A user flow map has at most 50 lanes, 2,000 steps, 4,000 arrows, and 64 tags. A
   source file is at most 16 MiB.
 
 ### Canonical text
 
-Shape map writes journey maps in this order: the declaration and header; each
+Shape map writes user flow maps in this order: the declaration and header; each
 lane with its steps; shared steps; arrows; `classDef` lines; one `class` line per
 used tag, listing lanes and then steps in declaration order; summaries for lanes
 and then steps; and legends. It indents with two spaces, and four inside a lane.
 A valid file in another order is accepted as written. The first edit from Shape
-map rewrites it in canonical order without changing its meaning. Invalid journey
-sources follow the same safety boundary as v1 maps: they are never rewritten.
+map rewrites it in canonical order without changing its meaning. Invalid user
+flow sources follow the same safety boundary as v1 maps: they are never rewritten.

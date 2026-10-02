@@ -199,7 +199,7 @@ the single-map behavior above is unchanged. Project maps follow
   relative to the workspace root, with `/` separators.
 - `GET /api/project?project=KEY` returns `{ "project", "maps": [...] }`. Each map
   is `{ "file", "path", "kind", "title", "description?", "editable", "declaredKind?", "error?", "line?" }`.
-  `kind` is `features`, `journey`, or `other`; `declaredKind` keeps a header kind
+  `kind` is `features`, `user-flow`, or `other`; `declaredKind` keeps a header kind
   this version does not know. A map that cannot be edited explains why in
   `error`, with `line` when one line is at fault.
 - `GET /api/project/events?project=KEY` is an SSE stream of `maps` events carrying
@@ -218,7 +218,7 @@ history, and `/api/view` keeps canvas state in Shape map's local state directory
 the project.
 
 Snapshots carry `kind`. A `features` snapshot is the v1 snapshot above; its
-`graph.map` holds the header when the source has one. A journey snapshot is:
+`graph.map` holds the header when the source has one. A user flow snapshot is:
 
 ```json
 {
@@ -226,11 +226,11 @@ Snapshots carry `kind`. A `features` snapshot is the v1 snapshot above; its
   "updatedAt": "ISO-8601",
   "origin": "startup|external|<clientId>",
   "mapPath": "docs/maps/rooms.mmd",
-  "kind": "journey",
+  "kind": "user-flow",
   "editable": true,
-  "source": "flowchart LR\n  %% sm-map: {\"kind\":\"journey\",\"title\":\"방 동선\"}\n  ...",
+  "source": "flowchart LR\n  %% sm-map: {\"kind\":\"user-flow\",\"title\":\"방 들어가기\"}\n  ...",
   "graph": {
-    "map": { "kind": "journey", "title": "방 동선" },
+    "map": { "kind": "user-flow", "title": "방 들어가기" },
     "lanes": [{ "id": "player", "title": "플레이어", "tags": [], "summary": "처음 온 사람이에요." }],
     "steps": [{ "id": "player_enter", "label": "게임에 들어오기", "shape": "milestone", "lane": "player", "tags": ["plaza"] }],
     "arrows": [{ "source": "player_enter", "target": "player_quick", "style": "next" }],
@@ -252,10 +252,10 @@ when it is known and `other` otherwise. Mutations on it return 422
 `read_only_map`; a map that became invalid after opening keeps the v1 behavior
 and returns `invalid_source`.
 
-### Journey operations
+### User flow operations
 
-Journey maps use `POST /api/mutations?project=KEY&map=FILE` with
-`{ "baseRevision", "clientId", "operation" }`. Every journey operation needs the
+User flow maps use `POST /api/mutations?project=KEY&map=FILE` with
+`{ "baseRevision", "clientId", "operation" }`. Every user flow operation needs the
 exact current revision.
 
 | Operation | Fields |
@@ -274,7 +274,7 @@ exact current revision.
 | `upsertTag` | `tag`: `{ id, label, description, fill, stroke, textColor, strokeWidth }` |
 | `deleteTag` | `id`; removes the tag from every lane and step |
 | `setMapHeader` | optional `title` and `description` (`null` removes) |
-| `replaceSource` | `source`: complete journey text that must parse as a journey map; used by the source editor and by undo and redo |
+| `replaceSource` | `source`: complete text that must parse as a user flow map; used by the source editor and by undo and redo |
 
 Generated IDs are the smallest unused `step-N` or `lane-N`. Validation failures
 return 422 `validation_error`; source errors include `details.line`. A stale
@@ -284,5 +284,5 @@ canonical result equals the current source skips the write and the SSE event.
 
 `npm run map -- check PATH` validates one map file or a `docs/maps` folder without
 a running server. It prints each file's kind, title, and first error with its
-line, and exits with status 1 when a file that declares `features` or `journey`
+line, and exits with status 1 when a file that declares `features` or `user-flow`
 is not valid.
