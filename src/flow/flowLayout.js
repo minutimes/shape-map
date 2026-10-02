@@ -605,7 +605,8 @@ function routeOffGrid(pass, metrics) {
   for (const arrow of pass.arrows) {
     const blocked = offGrid.some((item) => item.id !== arrow.source && item.id !== arrow.target
       && arrow.points.some((point, index) => index > 0 && segmentCrosses(arrow.points[index - 1], point, item)))
-      || (arrow.labelBox && offGrid.some((item) => overlapBox(arrow.labelBox, item)));
+      // A label right beside a card that left the grid would sit on that card's arrows.
+      || (arrow.labelBox && offGrid.some((item) => overlapBox(arrow.labelBox, item, 18)));
     if (blocked) jobs.push({ arrow, key: arrow.key, isReturn: arrow.isReturn });
     else kept.push(arrow);
   }
@@ -674,22 +675,25 @@ function routeOffGrid(pass, metrics) {
   jobs.sort((a, b) => distance(a) - distance(b) || a.key.localeCompare(b.key));
   const used = new Map();
   for (const arrow of kept) markUsed(used, arrow.points);
-  const routed = jobs.map((job) => {
-    const points = routeAround({ start: job.start, exitSide: job.exit, end: job.end, entrySide: job.entry, obstacles: rects, used })
+  // Rerouted arrows keep off every label. Each one's own label is placed as soon as it is routed,
+  // clear of cards, labels, and the lines drawn so far, and later routes go around it.
+  const labels = kept.filter((arrow) => arrow.labelBox).map((arrow) => arrow.labelBox);
+  const obstacles = [...rects, ...labels.map((box) => ({ ...box, pad: 4 }))];
+  const routed = [];
+  for (const job of jobs) {
+    const points = routeAround({ start: job.start, exitSide: job.exit, end: job.end, entrySide: job.entry, obstacles, used })
       .map((point) => ({ x: Math.round(point.x * 10) / 10, y: Math.round(point.y * 10) / 10 }));
     markUsed(used, points);
-    return { key: job.key, source: job.arrow.source, target: job.arrow.target, style: job.arrow.style || 'next', label: job.arrow.label,
+    const arrow = { key: job.key, source: job.arrow.source, target: job.arrow.target, style: job.arrow.style || 'next', label: job.arrow.label,
       isReturn: job.isReturn, kind: 'free', points, labelBox: null };
-  });
-
-  // Labels of rerouted arrows sit on one of their runs, clear of cards and other labels.
-  const labels = kept.filter((arrow) => arrow.labelBox).map((arrow) => arrow.labelBox);
-  for (const arrow of routed) {
+    routed.push(arrow);
     if (!arrow.label) continue;
     const cut = truncateText(arrow.label, metrics.arrowLabelMaxText, metrics.arrowFont);
     const width = Math.ceil(textWidth(cut.text, metrics.arrowFont) + metrics.arrowLabelPadX * 2 + 4);
     const height = metrics.arrowLabelHeight;
-    const clear = (box) => !rects.some((item) => overlapBox(box, item)) && !labels.some((other) => overlapBox(box, other));
+    const lines = [...kept, ...routed].filter((other) => other !== arrow);
+    const onLine = (box) => lines.some((other) => other.points.some((point, index) => index > 0 && segmentCrosses(other.points[index - 1], point, box, 1)));
+    const clear = (box) => !rects.some((item) => overlapBox(box, item)) && !labels.some((other) => overlapBox(box, other)) && !onLine(box);
     const segments = arrow.points.slice(1).map((point, index) => ({ a: arrow.points[index], b: point, index,
       length: Math.abs(arrow.points[index].x - point.x) + Math.abs(arrow.points[index].y - point.y) }))
       .sort((p, q) => q.length - p.length || p.index - q.index);
@@ -734,6 +738,7 @@ function routeOffGrid(pass, metrics) {
     }
     arrow.labelBox = { x: Math.round(chosen.x), y: Math.round(chosen.y), width, height, text: cut.text, full: arrow.label, truncated: cut.truncated };
     labels.push(arrow.labelBox);
+    obstacles.push({ ...arrow.labelBox, pad: 4 });
   }
   const order = new Map(pass.ranking.arrows.map((arrow, index) => [arrowKey(arrow), index]));
   return [...kept, ...routed].sort((a, b) => order.get(a.key) - order.get(b.key));

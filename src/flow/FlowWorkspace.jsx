@@ -15,6 +15,7 @@ import FlowIcon from './FlowIcon.jsx';
 import { ProblemDetail } from './FlowFields.jsx';
 import { readOnlyReason } from '../mapKinds.js';
 import { createDraftStore, parseDraftKey } from './flowDrafts.js';
+import { laneMoveOperation, mergePlacements, placementPatchFor, removedPlacements, sameSpot } from './flowPlacement.js';
 
 const EMPTY_GRAPH = { map: {}, lanes: [], steps: [], arrows: [], tags: [] };
 const isTextTarget = (target) => Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
@@ -61,6 +62,9 @@ function FlowStudio({ api, map }) {
   const [history, setHistory] = useState({ undo: [], redo: [] });
   const [revealId, setRevealId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Placements and lane moves shown before the server confirms them.
+  const [pendingSpots, setPendingSpots] = useState(null);
+  const [pendingLanes, setPendingLanes] = useState(null);
   const snapshotRef = useRef(null);
   const drafts = useMemo(() => createDraftStore(), []);
   useSyncExternalStore(drafts.subscribe, drafts.version, drafts.version);
@@ -75,7 +79,7 @@ function FlowStudio({ api, map }) {
     const previous = snapshotRef.current;
     if (previous && next.updatedAt && previous.updatedAt && Date.parse(next.updatedAt) < Date.parse(previous.updatedAt)) return;
     if (previous && previous.revision === next.revision && previous.sourceStatus?.valid === next.sourceStatus?.valid
-      && previous.editable === next.editable) return;
+      && previous.editable === next.editable && JSON.stringify(previous.view ?? null) === JSON.stringify(next.view ?? null)) return;
     if (previous && next.revision !== previous.revision && next.origin !== clientId.current) updateHistory({ undo: [], redo: [] });
     snapshotRef.current = next;
     setSnapshot(next);
@@ -123,7 +127,9 @@ function FlowStudio({ api, map }) {
       const next = await api.mutateMap({ baseRevision: before.revision, clientId: clientId.current, operation });
       accept(next);
       if (options.record !== false && next.revision !== before.revision && before.source != null && next.source != null) {
-        updateHistory({ undo: pushHistory(historyRef.current.undo, { before: before.source, after: next.source, label }), redo: [] });
+        // Undoing a deletion also puts back where its cards were placed.
+        const view = removedPlacements(before.graph, next.graph, before.view?.flow?.positions);
+        updateHistory({ undo: pushHistory(historyRef.current.undo, { before: before.source, after: next.source, label, ...(view ? { view } : {}) }), redo: [] });
       }
       if (options.select !== undefined) setSelection(options.select);
       return { ok: true, snapshot: next, before };
@@ -137,6 +143,26 @@ function FlowStudio({ api, map }) {
     }
   }, [api, accept, notify, updateHistory]);
 
+  /** Saves hand placements ({ id: {x,y} | null }) as view state; the map file is not touched. */
+  const writePlacements = useCallback(async (patch) => {
+    const before = snapshotRef.current;
+    if (!api.saveView || !before?.graph) return { ok: false };
+    const positions = placementPatchFor(before.graph, patch);
+    if (!Object.keys(positions).length) return { ok: true, snapshot: before };
+    setPending((count) => count + 1);
+    try {
+      const next = await api.saveView({ baseRevision: before.revision, clientId: clientId.current, patch: { flow: { positions } } });
+      accept(next);
+      return { ok: true, snapshot: next };
+    } catch (error) {
+      if (error?.body?.snapshot) accept(error.body.snapshot);
+      notify(describeError(error, kindRef.current).text, true);
+      return { ok: false };
+    } finally {
+      setPending((count) => count - 1);
+    }
+  }, [api, accept, notify]);
+
   const send = useCallback((operation, label, options) => {
     if (!operation) return Promise.resolve({ ok: false });
     const task = queue.current.then(() => run(operation, label, options));
@@ -149,8 +175,15 @@ function FlowStudio({ api, map }) {
       const stacks = historyRef.current;
       const entry = direction === 'undo' ? stacks.undo.at(-1) : stacks.redo.at(-1);
       if (!entry) return;
-      const result = await run({ type: 'replaceSource', source: direction === 'undo' ? entry.before : entry.after }, entry.label, { record: false });
-      if (!result.ok) return;
+      const sourceChange = entry.before !== entry.after;
+      if (sourceChange) {
+        const result = await run({ type: 'replaceSource', source: direction === 'undo' ? entry.before : entry.after }, entry.label, { record: false });
+        if (!result.ok) return;
+      }
+      if (entry.view) {
+        const result = await writePlacements(direction === 'undo' ? entry.view.before : entry.view.after);
+        if (!result.ok && !sourceChange) return;
+      }
       const now = historyRef.current;
       updateHistory(direction === 'undo'
         ? { undo: now.undo.slice(0, -1), redo: [...now.redo, entry] }
@@ -159,7 +192,7 @@ function FlowStudio({ api, map }) {
     });
     queue.current = task.catch(() => {});
     return task;
-  }, [run, updateHistory, notify]);
+  }, [run, updateHistory, notify, writePlacements]);
 
   // Keep the selection while the selected thing still exists.
   useEffect(() => {
@@ -262,7 +295,95 @@ function FlowStudio({ api, map }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [travel, panel, selection, highlightTag, focusLane, act]);
 
-  const layout = useMemo(() => (graph ? layoutFlow(graph, { notes }) : null), [graph, notes]);
+  const savedSpots = snapshot?.view?.flow?.positions;
+  const placements = useMemo(() => mergePlacements(savedSpots, pendingSpots), [savedSpots, pendingSpots]);
+  const placementsRef = useRef(placements); placementsRef.current = placements;
+  const layoutGraph = useMemo(() => (graph && pendingLanes
+    ? { ...graph, steps: graph.steps.map((step) => (step.id in pendingLanes ? { ...step, lane: pendingLanes[step.id] } : step)) } : graph), [graph, pendingLanes]);
+  const layout = useMemo(() => (layoutGraph ? layoutFlow(layoutGraph, { notes, placements }) : null), [layoutGraph, notes, placements]);
+  const layoutRef = useRef(layout); layoutRef.current = layout;
+  const canPlace = editable && Boolean(api.saveView);
+  /** The layout as it would look with one card at `spot` in lane `laneId`, for the drag preview. */
+  const previewLayout = useCallback((id, laneId, spot) => {
+    if (!layoutGraph) return null;
+    const moved = laneId === undefined ? layoutGraph : { ...layoutGraph, steps: layoutGraph.steps.map((step) => (step.id === id ? { ...step, lane: laneId } : step)) };
+    return layoutFlow(moved, { notes, placements: { ...placements, [id]: spot } });
+  }, [layoutGraph, notes, placements]);
+
+  const clearPending = useCallback((patch, lanes) => {
+    setPendingSpots((now) => {
+      if (!now) return now;
+      const rest = { ...now };
+      for (const [id, spot] of Object.entries(patch)) if (rest[id] === spot) delete rest[id];
+      return Object.keys(rest).length ? rest : null;
+    });
+    if (lanes) setPendingLanes((now) => {
+      if (!now) return now;
+      const rest = { ...now };
+      for (const id of lanes) delete rest[id];
+      return Object.keys(rest).length ? rest : null;
+    });
+  }, []);
+
+  /** Puts a card at `spot` (inside its lane band); a different `laneId` also moves the step to that lane in the file. */
+  const place = useCallback(({ id, spot, laneId, at }) => {
+    const step = snapshotRef.current?.graph?.steps.find((item) => item.id === id);
+    if (!step || !editableRef.current || !api.saveView) return Promise.resolve();
+    const previous = placementsRef.current[id] ?? null;
+    const laneChange = laneId !== undefined && (step.lane ?? null) !== (laneId ?? null);
+    if (!laneChange && sameSpot(previous, spot)) return Promise.resolve();
+    const lane = laneChange ? snapshotRef.current.graph.lanes.find((item) => item.id === laneId) : null;
+    const label = laneChange ? `${words.lane} 바꾸기` : '카드 자리 옮기기';
+    setPendingSpots((now) => ({ ...(now || {}), [id]: spot }));
+    if (laneChange) setPendingLanes((now) => ({ ...(now || {}), [id]: laneId ?? null }));
+    const task = queue.current.then(async () => {
+      try {
+        const before = snapshotRef.current;
+        let after = before.source;
+        if (laneChange) {
+          const operation = laneMoveOperation(before.graph, layoutRef.current, id, laneId ?? null, at);
+          if (operation) {
+            const result = await run(operation, label, { record: false });
+            if (!result.ok) return;
+            after = result.snapshot.source;
+          }
+        }
+        const saved = await writePlacements({ [id]: spot });
+        if (!saved.ok && !laneChange) return;
+        updateHistory({ undo: pushHistory(historyRef.current.undo, { before: before.source, after, label,
+          ...(saved.ok ? { view: { before: { [id]: previous }, after: { [id]: spot } } } : {}) }), redo: [] });
+        if (laneChange) notify(`‘${lane?.title ?? words.shared}’ 쪽으로 옮겼어요. ⌘Z로 되돌릴 수 있어요.`);
+      } finally {
+        clearPending({ [id]: spot }, laneChange ? [id] : null);
+      }
+    });
+    queue.current = task.catch(() => {});
+    return task;
+  }, [api, run, writePlacements, updateHistory, notify, clearPending, words]);
+
+  /** Returns the given cards, or every placed card, to automatic placement. */
+  const resetPlacements = useCallback((ids = null) => {
+    const current = placementsRef.current;
+    const list = (ids ?? Object.keys(current)).filter((id) => current[id]);
+    if (!list.length || !editableRef.current || !api.saveView) return Promise.resolve();
+    const before = Object.fromEntries(list.map((id) => [id, current[id]]));
+    const after = Object.fromEntries(list.map((id) => [id, null]));
+    const label = ids ? '자동 자리로' : '모두 자동 자리로';
+    setPendingSpots((now) => ({ ...(now || {}), ...after }));
+    const task = queue.current.then(async () => {
+      try {
+        const source = snapshotRef.current.source;
+        const saved = await writePlacements(after);
+        if (!saved.ok) return;
+        updateHistory({ undo: pushHistory(historyRef.current.undo, { before: source, after: source, label, view: { before, after } }), redo: [] });
+        notify(ids ? '카드를 자동 자리로 돌렸어요.' : `직접 놓은 카드 ${list.length}장을 자동 자리로 돌렸어요. ⌘Z로 되돌릴 수 있어요.`);
+      } finally {
+        clearPending(after);
+      }
+    });
+    queue.current = task.catch(() => {});
+    return task;
+  }, [api, writePlacements, updateHistory, notify, clearPending]);
   const emphasis = useMemo(() => emphasisFor(graph, { tagId: highlightTag, laneId: focusLane }), [graph, highlightTag, focusLane]);
   const canvasSelect = useCallback((next) => select(next), [select]);
   const onConnect = useCallback((source, target) => { act.connect(source, target); }, [act]);
@@ -336,7 +457,8 @@ function FlowStudio({ api, map }) {
     <div className="fm-body">
       {layout ? <FlowCanvas graph={safeGraph} layout={layout} words={words} storageKey={viewportKey(map)} emphasis={emphasis} selection={selection} focusLane={focusLane} editable={editable} revealId={revealId}
         onSelect={canvasSelect} onConnect={onConnect} onAddNext={onAddNext} onInsert={onInsert} onAddInLane={onAddInLane} onSelectLane={onSelectLane}
-        onFocusLane={setFocusLane} onAddLane={act.addLane} /> : <div className="fm-empty"><p>그림을 그릴 수 없어요. 원문을 확인해 주세요.</p></div>}
+        onFocusLane={setFocusLane} onAddLane={act.addLane}
+        placements={placements} canPlace={canPlace} previewLayout={previewLayout} onPlace={place} onResetPlacements={resetPlacements} /> : <div className="fm-empty"><p>그림을 그릴 수 없어요. 원문을 확인해 주세요.</p></div>}
       {graph && !safeGraph.steps.length && !safeGraph.lanes.length && <div className="fm-start">
         <strong>아직 단계가 없어요</strong><p>첫 단계를 놓고, 다음 단계를 이어 가세요.</p>
         {editable && <div className="fm-row"><button type="button" className="fm-button fm-button--dark" onClick={() => act.addInLane(null)}><FlowIcon name="plus" size={14} />첫 단계 추가</button>

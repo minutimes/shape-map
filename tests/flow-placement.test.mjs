@@ -4,6 +4,8 @@ import { graphOf, parseFlow } from '../harness/flow/flowModel.js';
 import { generatedFlow } from '../harness/flow/fixtures.js';
 import { bandAt, freeSpot, layoutFlow, placementFor } from '../src/flow/flowLayout.js';
 import { chooseSides, routeAround } from '../src/flow/flowRouting.js';
+import { laneMoveOperation, mergePlacements, placementPatchFor, removedPlacements, sameSpot } from '../src/flow/flowPlacement.js';
+import { pushHistory } from '../src/flow/flowEditing.js';
 
 const read = (name) => graphOf(parseFlow(fs.readFileSync(new URL(`../examples/sample-project/docs/maps/${name}`, import.meta.url), 'utf8')));
 const lending = read('02-lending.mmd');
@@ -45,6 +47,11 @@ function checkClean(layout) {
     expect(onEdge(arrow.points[0], source), `${arrow.key} leaves its source`).toBe(true);
     expect(onEdge(arrow.points.at(-1), target), `${arrow.key} reaches its target`).toBe(true);
     if (arrow.labelBox) for (const card of cards) expect(overlaps(arrow.labelBox, card), `${arrow.key} label covers ${card.id}`).toBe(false);
+    // A rerouted arrow keeps off other arrows' labels.
+    if (arrow.kind === 'free') for (const other of layout.arrows) {
+      if (other === arrow || !other.labelBox) continue;
+      for (const segment of segments) expect(segmentHits(segment, other.labelBox), `${arrow.key} crosses the label of ${other.key}`).toBe(false);
+    }
   }
   for (const card of cards) {
     const band = layout.bands.find((entry) => entry.id === card.band);
@@ -169,6 +176,39 @@ describe('placing a dragged card', () => {
     for (const other of layout.cards.filter((item) => item.id !== 'owner_check')) expect(overlaps(box, other), other.id).toBe(false);
     const near = freeSpot(layout, 'reader_search', { width: target.width, height: target.height }, { x: target.x + 7, y: target.y - 5 }, reader);
     expect(near).toEqual({ x: target.x, y: target.y });
+  });
+});
+
+describe('placement bookkeeping', () => {
+  const layout = layoutFlow(lending);
+
+  it('shows unsaved placements over saved ones, with null removing one', () => {
+    const saved = { a: { x: 1, y: 2 }, b: { x: 3, y: 4 } };
+    expect(mergePlacements(saved, null)).toBe(saved);
+    expect(mergePlacements(saved, { a: null, c: { x: 5, y: 6 } })).toEqual({ b: { x: 3, y: 4 }, c: { x: 5, y: 6 } });
+    expect(sameSpot({ x: 1, y: 2 }, { x: 1.2, y: 2.3 })).toBe(true);
+    expect(sameSpot(null, { x: 1, y: 2 })).toBe(false);
+  });
+
+  it('remembers the placements a deletion removes so undo can restore them', () => {
+    const after = { ...lending, steps: lending.steps.filter((step) => step.id !== 'owner_check') };
+    expect(removedPlacements(lending, after, { owner_check: { x: 9, y: 9 }, reader_open: { x: 1, y: 1 } }))
+      .toEqual({ before: { owner_check: { x: 9, y: 9 } }, after: { owner_check: null } });
+    expect(removedPlacements(lending, lending, { owner_check: { x: 9, y: 9 } })).toBeNull();
+    expect(placementPatchFor(after, { owner_check: null, reader_open: { x: 1, y: 1 } })).toEqual({ reader_open: { x: 1, y: 1 } });
+  });
+
+  it('moves a step to another lane in reading order at the drop point', () => {
+    const at = layout.cards.find((card) => card.id === 'owner_accept').x - 10;
+    expect(laneMoveOperation(lending, layout, 'reader_wait', 'owner', at)).toEqual({ type: 'moveStep', id: 'reader_wait', lane: 'owner', before: 'owner_accept' });
+    expect(laneMoveOperation(lending, layout, 'reader_wait', 'owner', 1e6)).toEqual({ type: 'moveStep', id: 'reader_wait', lane: 'owner', after: 'owner_payout' });
+    expect(laneMoveOperation(lending, layout, 'reader_wait', 'catalog', 0)).toEqual({ type: 'moveStep', id: 'reader_wait', lane: 'catalog', before: 'catalog_send' });
+    expect(laneMoveOperation(lending, layout, 'reader_wait', 'reader', 0)).toBeNull();
+  });
+
+  it('keeps placement-only entries in the undo history', () => {
+    expect(pushHistory([], { before: 'a', after: 'a', label: 'x', view: { before: { s: null }, after: { s: { x: 1, y: 1 } } } })).toHaveLength(1);
+    expect(pushHistory([], { before: 'a', after: 'a', label: 'x' })).toHaveLength(0);
   });
 });
 

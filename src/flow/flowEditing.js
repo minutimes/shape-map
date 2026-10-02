@@ -175,7 +175,7 @@ export function connectableTargets(graph, sourceId) {
 }
 
 export function pushHistory(stack, entry, limit = 100) {
-  if (!entry || entry.before === entry.after) return stack;
+  if (!entry || (entry.before === entry.after && !entry.view)) return stack;
   return [...stack, entry].slice(-limit);
 }
 

@@ -47,6 +47,17 @@ export const StepCard = memo(function StepCard({ data, selected }) {
     <Handle type="source" position={columns ? Position.Bottom : Position.Right} id="out" className="fm-handle fm-handle--out" isConnectable={editable} title="끌어서 다른 단계와 잇기" />
     {selected && editable && <button type="button" className="fm-step__next nodrag nopan" aria-label={`${step.label} 다음 단계 추가`} title="다음 단계 추가"
       onClick={(event) => { event.stopPropagation(); data.onAddNext(step.id); }}><FlowIcon name="plus" size={13} /></button>}
+    {selected && data.placed && <button type="button" className="fm-step__auto nodrag nopan" title="직접 놓은 자리를 풀고 자동 자리로 돌려요" data-testid={`fm-auto-${step.id}`}
+      onClick={(event) => { event.stopPropagation(); data.onResetPlacement(step.id); }}><FlowIcon name="undo" size={12} />자동 자리로</button>}
+  </div>;
+});
+
+/** Where a moving card will land, with the lane it moves to when that changes. */
+export const LandingSpot = memo(function LandingSpot({ data }) {
+  const outline = shapePath(data.shape, data.width, data.height, data.point);
+  return <div className="fm-landing" style={{ width: data.width, height: data.height }} aria-hidden="true">
+    <svg width={data.width} height={data.height}><path d={outline} /></svg>
+    {data.hint && <span className="fm-landing__hint">{data.hint}</span>}
   </div>;
 });
 

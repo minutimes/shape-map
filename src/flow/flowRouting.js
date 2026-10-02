@@ -107,7 +107,9 @@ function search(start, startDir, end, endDir, area, used, pad = ROUTE_PAD) {
   const within = (point, box) => point.x > box.x0 + .01 && point.x < box.x1 - .01 && point.y > box.y0 + .01 && point.y < box.y1 - .01;
   // A card close to a port keeps only its own outline as the obstacle, so the port stays reachable.
   const boxes = area.inside.map((rect) => {
-    const padded = { x0: rect.x - pad, x1: rect.x + rect.width + pad, y0: rect.y - pad, y1: rect.y + rect.height + pad };
+    // An obstacle may ask for less room (an arrow label only needs a little).
+    const room = Math.min(pad, rect.pad ?? pad);
+    const padded = { x0: rect.x - room, x1: rect.x + rect.width + room, y0: rect.y - room, y1: rect.y + rect.height + room };
     return within(start, padded) || within(end, padded) ? { x0: rect.x, x1: rect.x + rect.width, y0: rect.y, y1: rect.y + rect.height } : padded;
   });
   const xBoundary = [area.x0, area.x1, start.x, end.x]; const yBoundary = [area.y0, area.y1, start.y, end.y];
@@ -236,7 +238,8 @@ export function simplifyPoints(points) {
 
 /**
  * Routes one arrow from `start` (a port on the source's `exitSide`) to `end`
- * (a port on the target's `entrySide`) around `obstacles` (card rectangles).
+ * (a port on the target's `entrySide`) around `obstacles` (card rectangles,
+ * or label boxes with a smaller `pad`).
  * Returns orthogonal points from port to port.
  */
 export function routeAround({ start, exitSide, end, entrySide, obstacles, used = null }) {

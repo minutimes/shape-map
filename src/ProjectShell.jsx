@@ -152,7 +152,7 @@ function ProjectView({ projectKey, mapFile, navigate }) {
   const editable = editableLatch.current.editable;
 
   const api = useMemo(() => (mapFile ? createMapApi({ project: projectKey, map: mapFile }) : null), [projectKey, mapFile]);
-  const flowApi = useMemo(() => api && { readMap: api.readMap, mutateMap: api.mutateMap, eventsUrl: api.eventsUrl }, [api]);
+  const flowApi = useMemo(() => api && { readMap: api.readMap, mutateMap: api.mutateMap, saveView: api.saveView, eventsUrl: api.eventsUrl }, [api]);
   const flowMap = useMemo(() => current && { project: projectKey, file: current.file, kind: current.kind, title: current.title,
     description: current.description, editable: current.editable }, [projectKey, current?.file, current?.kind, current?.title, current?.description, current?.editable]);
 
