@@ -75,7 +75,9 @@ When the product changes on purpose, update the check in the same change. Delete
 a check only when what it guarded no longer exists or another check covers it.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `npm test`, `npm run build`,
-and `npm run test:browser` on every pull request and every push to `main`.
+and `npm run test:browser` once on each trusted pull request, using the owner's
+repository-scoped Mac runner. Manual runs are available for recovery. External
+fork pull requests do not execute on the owner's Mac. See [local CI](docs/local-ci.md).
 
 Do not commit personal maps, generated view state, credentials, or local runtime
 files. Use a synthetic map for a reproducible bug report. A screenshot showing
